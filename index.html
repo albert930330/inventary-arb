@@ -1,0 +1,1929 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>INVENTARY ARB</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="bg-glow bg-glow-1"></div>
+<div class="bg-glow bg-glow-2"></div>
+
+<!-- PANTALLA: INICIO -->
+<div id="pantallaInicio" class="pantalla activa">
+  <div class="header">
+    <div class="header-left">
+      <h1>INVENTARY ARB</h1>
+      <p>Control Total + ONAT</p>
+    </div>
+    <div class="header-avatar">🏪</div>
+  </div>
+  <div class="saludo">
+    <p>Bienvenido,</p>
+    <h2 id="nombreNegocio">Mi Negocio 👋</h2>
+  </div>
+  <div class="hero-card">
+    <div class="hero-label">💰 Capital Invertido</div>
+    <div class="hero-amount"><span id="heroCapital">0</span> <small>CUP</small></div>
+    <div class="hero-sub">Valor de venta: <strong id="heroVenta">0</strong> CUP</div>
+    <div class="hero-badges">
+      <div class="badge badge-green">📦 <span id="heroTotal">0</span> productos</div>
+      <div class="badge badge-gold">📈 <span id="heroMargen">0</span>% margen</div>
+      <div class="badge badge-red" id="heroAlerta" style="display:none">⚠️ <span id="heroStockBajo">0</span> bajos</div>
+    </div>
+  </div>
+  <div class="mini-stats">
+    <div class="mini-card">
+      <span class="mini-icon">📦</span>
+      <div class="mini-value" id="statProductos">0</div>
+      <div class="mini-label">Productos</div>
+    </div>
+    <div class="mini-card">
+      <span class="mini-icon">🏪</span>
+      <div class="mini-value" id="statAlmacenes">0</div>
+      <div class="mini-label">Almacenes</div>
+    </div>
+    <div class="mini-card">
+      <span class="mini-icon">⚠️</span>
+      <div class="mini-value" id="statStock">0</div>
+      <div class="mini-label">Stock bajo</div>
+    </div>
+  </div>
+  <div class="section-title"><h3>Módulos</h3></div>
+  <div class="menu-grid">
+    <div class="menu-btn destacado" onclick="abrirInventario()">
+      <div class="menu-icon icon-green">📦</div>
+      <div class="menu-text"><h4>Inventario</h4><p id="menuTotalProductos">0 productos</p></div>
+    </div>
+    <div class="menu-btn" onclick="abrirAlmacenes()">
+      <div class="menu-icon icon-blue">🏪</div>
+      <div class="menu-text"><h4>Almacenes</h4><p id="menuTotalAlmacenes">0 almacenes</p></div>
+    </div>
+    <div class="menu-btn" onclick="proximamente('Proveedores')">
+      <div class="menu-icon icon-teal">🤝</div>
+      <div class="menu-text"><h4>Proveedores</h4><p>Próximamente</p></div>
+    </div>
+    <div class="menu-btn" onclick="abrirClientes()">
+      <div class="menu-icon icon-gold">👥</div>
+      <div class="menu-text"><h4>Clientes</h4><p id="menuResumenClientes">0 clientes</p></div>
+    </div>
+    <div class="menu-btn" onclick="abrirGastos()">
+      <div class="menu-icon icon-red">🧾</div>
+      <div class="menu-text"><h4>Gastos</h4><p id="menuTotalGastos">0 este mes</p></div>
+    </div>
+    <div class="menu-btn" onclick="abrirReportes()">
+      <div class="menu-icon icon-purple">📊</div>
+      <div class="menu-text"><h4>Reportes</h4><p id="menuResumenReportes">Ver análisis</p></div>
+    </div>
+    <div class="menu-btn" onclick="proximamente('ONAT')">
+      <div class="menu-icon icon-orange">🏛️</div>
+      <div class="menu-text"><h4>ONAT <span class="chip-nuevo">TCP</span></h4><p>Módulo fiscal</p></div>
+    </div>
+  </div>
+  <div id="alertasInteligentes" style="display:none; padding:0 20px 4px;"></div>
+  <div class="section-title" id="seccionRecientes" style="display:none"><h3>Recientes</h3></div>
+  <div class="productos-lista" id="productosRecientes"></div>
+  <div class="spacer"></div>
+</div>
+
+<!-- PANTALLA: INVENTARIO -->
+<div id="pantallaInventario" class="pantalla">
+  <div class="header">
+    <button class="btn-back" onclick="volverInicio()">‹</button>
+    <div class="header-left"><h1>Inventario</h1><p id="invSubtitulo">0 productos</p></div>
+    <button class="btn-tool" onclick="toggleMenuOpciones()">⋯</button>
+  </div>
+  <div id="menuOpciones" class="menu-opciones oculto">
+    <button onclick="exportarPDF()">📄 Exportar PDF</button>
+    <button onclick="exportarExcel()">📊 Exportar Excel</button>
+    <button onclick="imprimirInventario()">🖨️ Imprimir</button>
+    <button onclick="compartirWhatsApp()">💬 Compartir WhatsApp</button>
+    <button onclick="importarCSV()">📥 Importar archivo</button>
+    <button onclick="toggleStockBajo()" id="btnStockBajo">⚠️ Solo stock bajo</button>
+    <button onclick="toggleGrupos()" id="btnGrupos">📂 Agrupar por categoría</button>
+    <input type="file" id="archivoImportar" accept=".csv,.xlsx" style="display:none">
+  </div>
+  <div class="toolbar">
+    <input type="text" id="buscar" placeholder="🔍 Buscar producto...">
+    <div class="toolbar-botones">
+      <button id="btnVistaTarjeta" class="btn-tool activo" onclick="cambiarVista('tarjeta')">⊞</button>
+      <button id="btnVistaLista" class="btn-tool" onclick="cambiarVista('lista')">☰</button>
+      <select id="ordenar" class="select-tool" onchange="mostrarInventario()">
+        <option value="nombre">A–Z</option>
+        <option value="cantidad">Cantidad</option>
+        <option value="compra">Precio</option>
+        <option value="fecha">Fecha</option>
+      </select>
+      <select id="filtroUbicacion" class="select-tool" onchange="mostrarInventario()">
+        <option value="">📍 Todos</option>
+        <option>Almacén principal</option>
+        <option>Tienda</option>
+        <option>Almacén secundario</option>
+      </select>
+    </div>
+  </div>
+  <div id="listaProductos" class="vista-tarjeta"></div>
+  <div class="barra-resumen">
+    <div class="resumen-item"><span>💰 Invertido</span><strong id="resumenCapital">0 CUP</strong></div>
+    <div class="resumen-item"><span>📈 Ganancia</span><strong id="resumenGanancia">0 CUP</strong></div>
+    <div class="resumen-item"><span>📦 Total</span><strong id="resumenTotal">0</strong></div>
+  </div>
+</div>
+
+<!-- MODAL: NUEVO / EDITAR PRODUCTO -->
+<div id="modalProducto" class="modal oculto">
+<div class="modal-contenido">
+  <div class="modal-header">
+    <h2 id="modalTitulo">📦 Nuevo Producto</h2>
+    <button class="btn-cerrar" onclick="cerrarModalProducto()">✕</button>
+  </div>
+  <label>Nombre del producto *</label>
+  <input type="text" id="nombre" placeholder="Ej: Aceite vegetal">
+  <label>Código de barras</label>
+  <div class="input-con-boton">
+    <input type="text" id="codigoBarras" placeholder="Escanear o escribir código">
+    <button type="button" onclick="abrirEscaner('codigoBarras')">📷</button>
+  </div>
+  <label>Categoría *</label>
+  <select id="categoria">
+    <option value="">— Seleccionar —</option>
+    <option>Alimentos</option><option>Bebidas</option><option>Limpieza</option>
+    <option>Higiene personal</option><option>Ropa y calzado</option>
+    <option>Electrónica</option><option>Ferretería</option><option>Medicamentos</option>
+    <option>Materia prima</option><option>Otro</option>
+  </select>
+  <div class="fila-doble">
+    <div><label>Cantidad *</label><input type="number" id="cantidad" placeholder="0" min="0"></div>
+    <div><label>Unidad *</label>
+      <select id="unidad">
+        <option value="">—</option><option>Unidad</option><option>Kg</option>
+        <option>Litro</option><option>Caja</option><option>Paquete</option>
+        <option>Par</option><option>Metro</option><option>Gramo</option>
+      </select>
+    </div>
+  </div>
+  <div class="fila-doble">
+    <div><label>Precio Compra *</label><input type="number" id="compra" placeholder="0.00" min="0"></div>
+    <div><label>Precio Venta *</label><input type="number" id="venta" placeholder="0.00" min="0"></div>
+  </div>
+
+  <div class="cfg-toggle-row2" style="padding:10px 0 4px;">
+    <div class="cfg-row-body">
+      <span class="cfg-row-titulo">Precios por cantidad</span>
+      <span class="cfg-row-sub">Activa precios mayoristas por volumen</span>
+    </div>
+    <label class="cfg-toggle"><input type="checkbox" id="usaEscalas" onchange="toggleEscalasProducto()"><span class="cfg-toggle-slider"></span></label>
+  </div>
+  <div id="escalasContenedor" class="oculto">
+    <div id="escalasLista" style="display:flex; flex-direction:column; gap:8px; margin-top:6px;"></div>
+    <button type="button" class="btn-detalles" style="margin-top:10px;" onclick="agregarEscalaProducto()">＋ Agregar escala de precio</button>
+  </div>
+
+  <label>Ubicación *</label>
+  <select id="almacen">
+    <option value="">— Seleccionar —</option>
+    <option>Almacén principal</option><option>Tienda</option><option>Almacén secundario</option>
+  </select>
+  <button id="btnMasDetalles" class="btn-detalles">＋ Más detalles (opcional)</button>
+  <div id="masDetalles" class="oculto">
+    <label>Marca</label><input type="text" id="marca" placeholder="Ej: Nestlé">
+    <label>Proveedor</label><input type="text" id="proveedor" placeholder="Ej: Mayorista Habana">
+    <label>Stock mínimo</label><input type="number" id="stock" placeholder="Ej: 5" min="0">
+    <label>Fecha de vencimiento</label><input type="date" id="vencimiento">
+    <label>Observaciones</label><textarea id="observaciones" placeholder="Notas adicionales..."></textarea>
+  </div>
+  <button id="guardarProducto">💾 Guardar Producto</button>
+</div>
+</div>
+
+<!-- BOTÓN FLOTANTE -->
+<button id="btnFlotante" onclick="abrirModalProducto()">＋</button>
+
+<!-- BOTTOM NAV -->
+<nav class="bottom-nav">
+  <button class="nav-item active" onclick="volverInicio()"><span class="nav-icon">🏠</span><span>Inicio</span></button>
+  <button class="nav-item" onclick="abrirInventario()"><span class="nav-icon">📦</span><span>Inventario</span></button>
+  <button class="nav-item" onclick="abrirMovimientos()"><span class="nav-icon">🔄</span><span>Movimientos</span></button>
+  <button class="nav-item" onclick="abrirHistorial()"><span class="nav-icon">📋</span><span>Historial</span></button>
+  <button class="nav-item" onclick="abrirConfiguracion()"><span class="nav-icon">⚙️</span><span>Config</span></button>
+</nav>
+
+<!-- PANTALLA: MOVIMIENTOS -->
+<div id="pantallaMovimientos" class="pantalla">
+  <div class="header">
+    <button class="btn-back" onclick="volverInicio()">‹</button>
+    <div class="header-left"><h1>Movimientos</h1><p>Entradas y Salidas</p></div>
+  </div>
+  <div class="tabs">
+    <button class="tab activo" id="tabEntrada" onclick="cambiarTab('entrada')">📥 Entrada</button>
+    <button class="tab" id="tabSalida" onclick="cambiarTab('salida')">📤 Salida</button>
+  </div>
+  <div class="tab-contenido">
+    <label>Producto *</label>
+    <div class="campo-producto-sel" onclick="abrirSheetProductos()">
+      <span id="textoProductoSel" class="texto-prod-placeholder">Toca para buscar un producto...</span>
+      <span class="arrow-prod">›</span>
+    </div>
+    <button class="btn-scan-mov" onclick="abrirEscaner('movCodigoBarras')">📷 Escanear código de barras</button>
+    <input type="hidden" id="movCodigoBarras">
+    <div id="productoSeleccionado" class="producto-seleccionado oculto">
+      <div class="prod-sel-info">
+        <span id="prodSelNombre">—</span>
+        <button onclick="limpiarSeleccionProducto()">✕</button>
+      </div>
+      <div id="infoProdMov" class="info-producto">
+        <div class="info-prod-row"><span>Stock:</span><strong id="movStockActual">—</strong></div>
+        <div class="info-prod-row"><span>Ubicación:</span><strong id="movUbicacion">—</strong></div>
+      </div>
+    </div>
+    <input type="hidden" id="movProducto">
+    <label>Cantidad *</label><input type="number" id="movCantidad" placeholder="0" min="1" oninput="actualizarPrecioSugerido()">
+    <div id="movEscalaSugerida" class="oculto" style="background:rgba(0,232,150,0.06); border:1px solid rgba(0,232,150,0.2); border-radius:12px; padding:10px 14px; margin-top:6px; font-size:13px;">
+      <div style="color:var(--text2); font-size:11px; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:3px;">💡 Precio aplicado</div>
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <span id="movEscalaNombre" style="color:var(--accent); font-weight:600;">—</span>
+        <strong id="movEscalaPrecio" style="font-family:'Syne',Arial,sans-serif; color:var(--accent);">—</strong>
+      </div>
+    </div>
+    <label>Precio unitario (CUP)</label><input type="number" id="movPrecio" placeholder="0.00" min="0">
+    <div id="camposEntrada">
+      <label>Proveedor</label><input type="text" id="movProveedor" placeholder="Nombre del proveedor">
+      <label>Número de factura</label><input type="text" id="movFactura" placeholder="Ej: FAC-001">
+    </div>
+    <div id="camposSalida" class="oculto">
+      <label>Motivo</label>
+      <select id="movMotivo">
+        <option value="venta">💰 Venta</option><option value="merma">📉 Merma / Pérdida</option>
+        <option value="traslado">🔄 Traslado</option><option value="devolucion">↩️ Devolución</option>
+        <option value="consumo">🍽️ Consumo interno</option>
+      </select>
+      <label>Método de pago</label>
+      <select id="movMetodoPago" onchange="actualizarCampoFiado()">
+        <option value="efectivo">💵 Efectivo</option><option value="transfermovil">📱 Transfermóvil</option>
+        <option value="enzona">💳 EnZona</option><option value="transferencia">🏦 Transferencia bancaria</option>
+        <option value="fiado">📦 Crédito / Fiado</option>
+      </select>
+      <div id="campoFiado" class="oculto">
+        <label>Cliente *</label>
+        <div class="campo-producto-sel" onclick="abrirSheetClientes()">
+          <span id="textoClienteSel" class="texto-prod-placeholder">Toca para seleccionar cliente...</span>
+          <span class="arrow-prod">›</span>
+        </div>
+        <input type="hidden" id="movClienteId">
+        <label>Fecha de vencimiento (opcional)</label>
+        <input type="date" id="movFechaVencimiento">
+      </div>
+      <label>Cliente (opcional)</label><input type="text" id="movCliente" placeholder="Nombre del cliente">
+    </div>
+    <label>Nota (opcional)</label><textarea id="movNota" placeholder="Observaciones..."></textarea>
+    <button id="btnRegistrarMov">📥 Registrar Entrada</button>
+  </div>
+</div>
+
+<!-- PANTALLA: HISTORIAL -->
+<div id="pantallaHistorial" class="pantalla">
+  <div class="header">
+    <button class="btn-back" onclick="volverInicio()">‹</button>
+    <div class="header-left"><h1>Historial</h1><p id="historialSubtitulo">Todos los movimientos</p></div>
+  </div>
+  <div class="toolbar">
+    <input type="text" id="buscarHistorial" placeholder="🔍 Buscar..." oninput="mostrarHistorial()">
+    <div class="toolbar-botones">
+      <select id="filtroTipoMov" class="select-tool" onchange="mostrarHistorial()">
+        <option value="">Todos</option><option value="entrada">📥 Entradas</option><option value="salida">📤 Salidas</option>
+      </select>
+      <select id="filtroMes" class="select-tool" onchange="mostrarHistorial()">
+        <option value="">Todos</option><option value="hoy">Hoy</option>
+        <option value="semana">Esta semana</option><option value="mes">Este mes</option>
+      </select>
+    </div>
+  </div>
+  <div id="listaHistorial" style="padding:0 20px 100px;"></div>
+</div>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!-- PANTALLA: LISTA DE ALMACENES                   -->
+<!-- ═══════════════════════════════════════════════ -->
+<div id="pantallaAlmacenes" class="pantalla">
+  <div class="header">
+    <button class="btn-back" onclick="volverInicio()">‹</button>
+    <div class="header-left"><h1>Almacenes</h1><p>Control de ubicaciones</p></div>
+  </div>
+  <div class="toolbar">
+    <input type="text" id="buscarAlmacen" placeholder="🔍 Buscar almacén..." oninput="mostrarAlmacenes()">
+  </div>
+  <div id="listaAlmacenes" style="padding:0 20px 120px; display:flex; flex-direction:column; gap:12px;"></div>
+  <button id="btnNuevoAlmacen" onclick="abrirModalAlmacen()">＋</button>
+</div>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!-- PANTALLA: DASHBOARD DE ALMACÉN                 -->
+<!-- ═══════════════════════════════════════════════ -->
+<div id="pantallaAlmacenDetalle" class="pantalla">
+  <div class="header">
+    <button class="btn-back" onclick="volverAlmacenes()">‹</button>
+    <div class="header-left"><h1 id="almDetTitulo">Almacén</h1><p id="almDetSub">0 productos</p></div>
+    <button class="btn-tool" onclick="abrirModalAlmacen(almacenActualId)">✏️</button>
+  </div>
+
+  <div class="alm-stats-grid">
+    <div class="alm-stat-card">
+      <span class="alm-stat-icon">📦</span>
+      <strong id="almStatProductos">0</strong>
+      <span>Productos</span>
+    </div>
+    <div class="alm-stat-card">
+      <span class="alm-stat-icon">⚠️</span>
+      <strong id="almStatAlertas">0</strong>
+      <span>Stock bajo</span>
+    </div>
+    <div class="alm-stat-card">
+      <span class="alm-stat-icon">💰</span>
+      <strong id="almStatValor">0</strong>
+      <span>Capital</span>
+    </div>
+    <div class="alm-stat-card">
+      <span class="alm-stat-icon">🏷️</span>
+      <strong id="almStatValorVenta">0</strong>
+      <span>Valor venta</span>
+    </div>
+    <div class="alm-stat-card">
+      <span class="alm-stat-icon">📈</span>
+      <strong id="almStatGanancia">0</strong>
+      <span>Ganancia pot.</span>
+    </div>
+  </div>
+
+  <div class="alm-tabs">
+    <button class="alm-tab activo" id="almTabProductos" onclick="cambiarTabAlmacen('productos')">Productos</button>
+    <button class="alm-tab" id="almTabMovimientos" onclick="cambiarTabAlmacen('movimientos')">Movimientos</button>
+    <button class="alm-tab" id="almTabEstadisticas" onclick="cambiarTabAlmacen('estadisticas')">Estadísticas</button>
+    <button class="alm-tab" id="almTabAjustes" onclick="cambiarTabAlmacen('ajustes')">Ajustes</button>
+  </div>
+
+  <!-- TAB: PRODUCTOS DEL ALMACÉN -->
+  <div id="almContenidoProductos" class="alm-tab-contenido">
+    <div class="toolbar" style="padding:12px 20px 8px;">
+      <input type="text" id="buscarProductoAlmacen" placeholder="🔍 Buscar producto..." oninput="mostrarProductosAlmacen()">
+    </div>
+    <div id="listaProductosAlmacen" style="padding:0 20px 100px; display:flex; flex-direction:column; gap:8px;"></div>
+  </div>
+
+  <!-- TAB: MOVIMIENTOS DEL ALMACÉN -->
+  <div id="almContenidoMovimientos" class="alm-tab-contenido oculto">
+    <div style="padding:12px 20px 4px;">
+      <button class="alm-btn-transferir" onclick="abrirModalTransferencia()">🔄 Transferir a otro almacén</button>
+    </div>
+    <div class="alm-filtros-historial">
+      <button class="chip-filtro activo" data-filtro="todo" onclick="filtrarHistorialAlmacen(this)">Todo</button>
+      <button class="chip-filtro" data-filtro="hoy" onclick="filtrarHistorialAlmacen(this)">Hoy</button>
+      <button class="chip-filtro" data-filtro="semana" onclick="filtrarHistorialAlmacen(this)">Semana</button>
+      <button class="chip-filtro" data-filtro="mes" onclick="filtrarHistorialAlmacen(this)">Mes</button>
+    </div>
+    <div class="alm-filtros-historial" style="padding-top:0;">
+      <button class="chip-filtro activo" data-tipo="todo" onclick="filtrarTipoHistorialAlmacen(this)">📋 Todos</button>
+      <button class="chip-filtro" data-tipo="entrada" onclick="filtrarTipoHistorialAlmacen(this)">📥 Entradas</button>
+      <button class="chip-filtro" data-tipo="salida" onclick="filtrarTipoHistorialAlmacen(this)">📤 Salidas</button>
+      <button class="chip-filtro" data-tipo="transferencia" onclick="filtrarTipoHistorialAlmacen(this)">🔄 Transferencias</button>
+    </div>
+    <div id="listaHistorialAlmacen" style="padding:0 20px 100px;"></div>
+  </div>
+
+  <!-- TAB: ESTADÍSTICAS DEL ALMACÉN -->
+  <div id="almContenidoEstadisticas" class="alm-tab-contenido oculto">
+    <div class="cfg-grupo-label" style="padding-top:14px;">RESUMEN FINANCIERO</div>
+    <div class="alm-stats-grid2">
+      <div class="alm-stat-card2">
+        <span>Valor Compra</span>
+        <strong id="almEstCompra">0 CUP</strong>
+      </div>
+      <div class="alm-stat-card2">
+        <span>Valor Venta</span>
+        <strong id="almEstVenta">0 CUP</strong>
+      </div>
+      <div class="alm-stat-card2">
+        <span>Ganancia</span>
+        <strong id="almEstGanancia" class="accent">0 CUP</strong>
+      </div>
+      <div class="alm-stat-card2">
+        <span>Margen</span>
+        <strong id="almEstMargen" class="accent">0%</strong>
+      </div>
+    </div>
+
+    <div class="cfg-grupo-label">MOVIMIENTOS (30 DÍAS)</div>
+    <div class="cfg-grupo">
+      <div class="cfg-row" style="cursor:default;">
+        <div class="cfg-row-body">
+          <span class="cfg-row-titulo">📥 Entradas</span>
+          <span class="cfg-row-sub" id="almEstEntradas">0 movimientos</span>
+        </div>
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-row" style="cursor:default;">
+        <div class="cfg-row-body">
+          <span class="cfg-row-titulo">📤 Salidas</span>
+          <span class="cfg-row-sub" id="almEstSalidas">0 movimientos</span>
+        </div>
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-row" style="cursor:default;">
+        <div class="cfg-row-body">
+          <span class="cfg-row-titulo">🔄 Transferencias</span>
+          <span class="cfg-row-sub" id="almEstTransferencias">0 movimientos</span>
+        </div>
+      </div>
+    </div>
+
+    <div id="almEstSinDatos" class="cfg-info-box2 oculto" style="margin:14px 20px;">
+      <span>📊</span>
+      <p>Aún no hay movimientos en los últimos 30 días para graficar.</p>
+    </div>
+
+    <div class="cfg-grupo-label">⚠️ ALERTAS DE STOCK</div>
+    <div id="almAlertasLista" class="cfg-grupo"></div>
+    <div style="padding:14px 20px 0;">
+      <button class="alm-btn-transferir" id="btnCompartirAlertas" onclick="compartirAlertasAlmacen()">📲 Compartir lista por WhatsApp</button>
+    </div>
+    <div style="height:30px"></div>
+  </div>
+
+  <!-- TAB: AJUSTES DEL ALMACÉN -->
+  <div id="almContenidoAjustes" class="alm-tab-contenido oculto">
+    <div class="cfg-grupo-label" style="padding-top:14px;">INFORMACIÓN</div>
+    <div class="cfg-grupo">
+      <div class="cfg-input-row">
+        <span class="cfg-input-label">Responsable</span>
+        <span class="cfg-valor-readonly" id="almAjusteResponsable">—</span>
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-input-row">
+        <span class="cfg-input-label">Dirección</span>
+        <span class="cfg-valor-readonly" id="almAjusteDireccion">—</span>
+      </div>
+    </div>
+
+    <div class="cfg-grupo-label">PERMISOS</div>
+    <div class="cfg-grupo">
+      <div class="cfg-row" style="cursor:default;">
+        <div class="cfg-row-body"><span class="cfg-row-titulo">Permite ventas</span></div>
+        <span id="almAjusteVentasIcon" class="cfg-check-mark">✓</span>
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-row" style="cursor:default;">
+        <div class="cfg-row-body"><span class="cfg-row-titulo">Permite transferencias</span></div>
+        <span id="almAjusteTransfIcon" class="cfg-check-mark">✓</span>
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-row" style="cursor:default;">
+        <div class="cfg-row-body"><span class="cfg-row-titulo">Almacén activo</span></div>
+        <span id="almAjusteActivoIcon" class="cfg-check-mark">✓</span>
+      </div>
+    </div>
+    <div class="cfg-hint" style="padding:6px 20px 0;">Para cambiar estos valores, toca el ícono ✏️ en la parte superior.</div>
+
+    <div class="cfg-grupo-label">ZONA DE PELIGRO</div>
+    <div class="cfg-grupo">
+      <button class="cfg-btn-accion cfg-btn-danger2" onclick="confirmarEliminarAlmacen()">🗑️ Eliminar este almacén</button>
+    </div>
+    <div style="height:30px"></div>
+  </div>
+</div>
+
+<!-- MODAL: CREAR / EDITAR ALMACÉN -->
+<div id="modalAlmacen" class="modal oculto">
+<div class="modal-contenido">
+  <div class="modal-header">
+    <h2 id="modalAlmacenTitulo">🏪 Nuevo Almacén</h2>
+    <button class="btn-cerrar" onclick="cerrarModalAlmacen()">✕</button>
+  </div>
+  <label>Nombre del almacén *</label>
+  <input type="text" id="almNombre" placeholder="Ej: Almacén Central">
+  <label>Ícono</label>
+  <div class="cfg-emoji-selector" style="padding:4px 0;">
+    <div class="cfg-emoji-grande" id="almEmojiPreview">🏪</div>
+    <div class="cfg-emoji-scroll" id="almEmojiScroll"></div>
+    <input type="hidden" id="almEmoji" value="🏪">
+  </div>
+  <label>Responsable</label>
+  <input type="text" id="almResponsable" placeholder="Nombre del encargado">
+  <label>Dirección</label>
+  <input type="text" id="almDireccion" placeholder="Ubicación física">
+  <div style="margin-top:18px;">
+    <div class="cfg-toggle-row2" style="padding:10px 0;">
+      <div class="cfg-row-body"><span class="cfg-row-titulo">Permitir ventas</span></div>
+      <label class="cfg-toggle"><input type="checkbox" id="almPermiteVentas" checked><span class="cfg-toggle-slider"></span></label>
+    </div>
+    <div class="cfg-toggle-row2" style="padding:10px 0;">
+      <div class="cfg-row-body"><span class="cfg-row-titulo">Permitir transferencias</span></div>
+      <label class="cfg-toggle"><input type="checkbox" id="almPermiteTransferencias" checked><span class="cfg-toggle-slider"></span></label>
+    </div>
+    <div class="cfg-toggle-row2" style="padding:10px 0;">
+      <div class="cfg-row-body"><span class="cfg-row-titulo">Almacén activo</span></div>
+      <label class="cfg-toggle"><input type="checkbox" id="almActivo" checked><span class="cfg-toggle-slider"></span></label>
+    </div>
+  </div>
+  <button id="btnGuardarAlmacen">💾 Guardar Almacén</button>
+</div>
+</div>
+
+<!-- MODAL: TRANSFERENCIA ENTRE ALMACENES -->
+<div id="modalTransferencia" class="modal oculto">
+<div class="modal-contenido">
+  <div class="modal-header">
+    <h2>🔄 Transferencia</h2>
+    <button class="btn-cerrar" onclick="cerrarModalTransferencia()">✕</button>
+  </div>
+  <label>Producto *</label>
+  <div class="campo-producto-sel" onclick="abrirSheetProductosTransferencia()">
+    <span id="textoProductoTransf" class="texto-prod-placeholder">Toca para buscar un producto...</span>
+    <span class="arrow-prod">›</span>
+  </div>
+  <input type="hidden" id="transfProducto">
+  <div id="transfInfoProducto" class="info-producto oculto">
+    <div class="info-prod-row"><span>Stock disponible:</span><strong id="transfStockDisponible">—</strong></div>
+  </div>
+  <label>Desde</label>
+  <div class="cfg-dato-readonly" id="transfDesde">—</div>
+  <label>Hacia *</label>
+  <select id="transfHacia">
+    <option value="">— Seleccionar almacén —</option>
+  </select>
+  <label>Cantidad *</label>
+  <input type="number" id="transfCantidad" placeholder="0" min="1">
+  <label>Nota (opcional)</label>
+  <textarea id="transfNota" placeholder="Observaciones..."></textarea>
+  <button id="btnConfirmarTransferencia">🔄 Transferir</button>
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!-- PANTALLA: REPORTES                              -->
+<!-- ═══════════════════════════════════════════════ -->
+<div id="pantallaReportes" class="pantalla">
+  <div class="header">
+    <button class="btn-back" onclick="volverInicio()">‹</button>
+    <div class="header-left"><h1>Reportes</h1><p id="repSubtitulo">Hoy</p></div>
+    <button class="btn-tool" onclick="exportarReportePDF()">📄</button>
+  </div>
+
+  <div class="alm-filtros-historial" style="padding:12px 20px 8px;">
+    <button class="chip-filtro activo" data-vista="dia" onclick="cambiarVistaReporte(this)">📅 Hoy</button>
+    <button class="chip-filtro" data-vista="mes" onclick="cambiarVistaReporte(this)">📆 Este mes</button>
+    <button class="chip-filtro" data-vista="periodo" onclick="cambiarVistaReporte(this)">📊 Período</button>
+  </div>
+
+  <div id="rep-periodo-selector" class="oculto" style="padding:0 20px 10px; display:flex; gap:10px; align-items:center;">
+    <input type="date" id="repFechaInicio" class="rep-date-input" onchange="actualizarReporte()">
+    <span style="color:var(--text2);">→</span>
+    <input type="date" id="repFechaFin" class="rep-date-input" onchange="actualizarReporte()">
+  </div>
+
+  <div class="rep-indicadores">
+    <div class="rep-ind-card"><span id="repIndMargen">0%</span><p>Margen</p></div>
+    <div class="rep-ind-card"><span id="repIndVentaPromedio">0</span><p>Venta prom.</p></div>
+    <div class="rep-ind-card"><span id="repIndProductosVendidos">0</span><p>Uds. vendidas</p></div>
+    <div class="rep-ind-card"><span id="repIndClientesActivos">0</span><p>Clientes activos</p></div>
+  </div>
+
+  <div class="cfg-grupo-label">RESULTADO FINANCIERO</div>
+  <div class="dashfin-cascada">
+    <div class="dashfin-row"><span>Ventas totales</span><strong id="repVentas">0 CUP</strong></div>
+    <div class="dashfin-row dashfin-resta"><span>− Costo FIFO real</span><strong id="repCosto">0 CUP</strong></div>
+    <div class="dashfin-sep"></div>
+    <div class="dashfin-row dashfin-subtotal"><span>= Ganancia bruta</span><strong id="repGananciaBruta">0 CUP</strong></div>
+    <div class="dashfin-row dashfin-resta"><span>− Gastos operativos</span><strong id="repGastos">0 CUP</strong></div>
+    <div class="dashfin-sep"></div>
+    <div class="dashfin-row dashfin-total"><span>= Ganancia neta</span><strong id="repGananciaNeta">0 CUP</strong></div>
+  </div>
+
+  <div class="cfg-grupo-label">VENTAS POR MÉTODO DE PAGO</div>
+  <div id="repMetodosPago" class="cfg-grupo"></div>
+
+  <div class="cfg-grupo-label">🏆 MÁS RENTABLES</div>
+  <div id="repTopRentables" class="cfg-grupo"></div>
+
+  <div class="cfg-grupo-label">📦 MÁS VENDIDOS (cantidad)</div>
+  <div id="repTopVendidos" class="cfg-grupo"></div>
+
+  <div class="cfg-grupo-label">⚠️ SIN MOVIMIENTO</div>
+  <div id="repSinMovimiento" class="cfg-grupo"></div>
+
+  <div class="cfg-grupo-label">👥 CLIENTES CON SALDO PENDIENTE</div>
+  <div id="repClientesPendientes" class="cfg-grupo"></div>
+
+  <div class="cfg-grupo-label">📦 VALOR DEL INVENTARIO</div>
+  <div class="dashfin-cascada">
+    <div class="dashfin-row"><span>Capital invertido</span><strong id="repCapital">0 CUP</strong></div>
+    <div class="dashfin-row"><span>Valor de venta</span><strong id="repValorVenta">0 CUP</strong></div>
+    <div class="dashfin-sep"></div>
+    <div class="dashfin-row dashfin-total"><span>Ganancia potencial</span><strong id="repGananciaPotencial">0 CUP</strong></div>
+  </div>
+
+  <div id="repComparacionBloque" class="oculto">
+    <div class="cfg-grupo-label">📈 VS MES ANTERIOR</div>
+    <div class="dashfin-cascada">
+      <div class="dashfin-row"><span>Ventas mes anterior</span><strong id="repVentasAnterior">0 CUP</strong></div>
+      <div class="dashfin-row"><span>Ganancia mes anterior</span><strong id="repGananciaAnterior">0 CUP</strong></div>
+      <div class="dashfin-sep"></div>
+      <div class="dashfin-row dashfin-total"><span>Variación ventas</span><strong id="repVariacion">—</strong></div>
+    </div>
+  </div>
+
+  <div class="cfg-grupo-label">GASTOS POR CATEGORÍA</div>
+  <div id="repGastosCategorias" class="cfg-grupo"></div>
+
+  <div style="padding:14px 20px 20px;">
+    <button class="alm-btn-transferir" onclick="compartirReporteWhatsApp()">📲 Compartir resumen por WhatsApp</button>
+  </div>
+  <div style="height:90px;"></div>
+</div>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!-- PANTALLA: CLIENTES                              -->
+<!-- ═══════════════════════════════════════════════ -->
+<div id="pantallaClientes" class="pantalla">
+  <div class="header">
+    <button class="btn-back" onclick="volverInicio()">‹</button>
+    <div class="header-left"><h1>Clientes</h1><p>Cuentas por cobrar</p></div>
+    <button class="btn-tool" onclick="toggleMenuOpcionesClientes()">⋯</button>
+  </div>
+  <div id="menuOpcionesClientes" class="menu-opciones oculto">
+    <button onclick="exportarClientesPDF()">📄 Exportar PDF</button>
+    <button onclick="exportarClientesExcel()">📊 Exportar Excel</button>
+  </div>
+
+  <!-- Dashboard resumen -->
+  <div class="gas-resumen-grid">
+    <div class="gas-resumen-card">
+      <span class="gas-resumen-icon">👥</span>
+      <strong id="cliResumenTotal">0</strong>
+      <span>Clientes</span>
+    </div>
+    <div class="gas-resumen-card gas-resumen-destacada">
+      <span class="gas-resumen-icon">💰</span>
+      <strong id="cliResumenPorCobrar">0</strong>
+      <span>Por cobrar</span>
+    </div>
+    <div class="gas-resumen-card">
+      <span class="gas-resumen-icon">⚠️</span>
+      <strong id="cliResumenVencidos">0</strong>
+      <span>Vencidos</span>
+    </div>
+    <div class="gas-resumen-card">
+      <span class="gas-resumen-icon">🟢</span>
+      <strong id="cliResumenAlDia">0</strong>
+      <span>Al día</span>
+    </div>
+  </div>
+
+  <!-- Buscador y filtro -->
+  <div class="toolbar">
+    <input type="text" id="buscarCliente" placeholder="🔍 Buscar cliente..." oninput="mostrarClientes()">
+    <div class="toolbar-botones">
+      <select id="filtroEstadoCliente" class="select-tool" onchange="mostrarClientes()">
+        <option value="">Todos</option>
+        <option value="verde">🟢 Al día</option>
+        <option value="amarillo">🟡 Pago lento</option>
+        <option value="rojo">🔴 Moroso</option>
+      </select>
+    </div>
+  </div>
+
+  <div id="listaClientes" style="padding:0 20px 120px; display:flex; flex-direction:column; gap:8px;"></div>
+  <button id="btnNuevoCliente" onclick="abrirModalCliente()">＋</button>
+</div>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!-- PANTALLA: PERFIL DE CLIENTE                     -->
+<!-- ═══════════════════════════════════════════════ -->
+<div id="pantallaPerfilCliente" class="pantalla">
+  <div class="header">
+    <button class="btn-back" onclick="volverClientes()">‹</button>
+    <div class="header-left">
+      <h1 id="perfilClienteNombre">Cliente</h1>
+      <p id="perfilClienteEstado">—</p>
+    </div>
+    <button class="btn-tool" onclick="abrirModalCliente(clienteActualId)">✏️</button>
+  </div>
+
+  <!-- Info y saldo -->
+  <div class="cli-perfil-info">
+    <div id="perfilClienteTelefono" class="cli-perfil-dato oculto">
+      <span>📞</span><span id="perfilClienteTelefonoVal">—</span>
+    </div>
+    <div id="perfilClienteDireccion" class="cli-perfil-dato oculto">
+      <span>📍</span><span id="perfilClienteDireccionVal">—</span>
+    </div>
+  </div>
+
+  <div class="cli-saldo-card">
+    <div class="cli-saldo-row">
+      <span>Saldo pendiente</span>
+      <strong id="perfilSaldo" class="warn-text">0 CUP</strong>
+    </div>
+    <div class="cli-saldo-row" id="perfilLimiteRow">
+      <span>Límite de crédito</span>
+      <strong id="perfilLimite">Sin límite</strong>
+    </div>
+    <div class="cli-saldo-row" id="perfilVencidoRow" style="display:none;">
+      <span>⚠️ Deuda vencida</span>
+      <strong id="perfilVencido" class="warn-text">0 CUP</strong>
+    </div>
+  </div>
+
+  <div style="padding:0 20px 10px; display:flex; gap:10px;">
+    <button class="cli-btn-abono" onclick="abrirModalAbono()">💵 Registrar abono</button>
+    <button class="cli-btn-saldar" onclick="saldarTodo()">✅ Saldar todo</button>
+  </div>
+
+  <!-- Tabs -->
+  <div class="alm-tabs" style="margin-top:4px;">
+    <button class="alm-tab activo" id="cliTabFiados" onclick="cambiarTabCliente('fiados')">Fiados</button>
+    <button class="alm-tab" id="cliTabAbonos" onclick="cambiarTabCliente('abonos')">Abonos</button>
+  </div>
+
+  <div id="cliContenidoFiados" style="padding:0 20px 100px;"></div>
+  <div id="cliContenidoAbonos" class="oculto" style="padding:0 20px 100px;"></div>
+</div>
+
+<!-- MODAL: NUEVO / EDITAR CLIENTE -->
+<div id="modalCliente" class="modal oculto">
+<div class="modal-contenido">
+  <div class="modal-header">
+    <h2 id="modalClienteTitulo">👤 Nuevo Cliente</h2>
+    <button class="btn-cerrar" onclick="cerrarModalCliente()">✕</button>
+  </div>
+  <label>Nombre *</label>
+  <input type="text" id="cliNombre" placeholder="Ej: Juan Pérez">
+  <label>Teléfono (opcional)</label>
+  <input type="tel" id="cliTelefono" placeholder="Ej: 5551234">
+  <label>Dirección (opcional)</label>
+  <input type="text" id="cliDireccion" placeholder="Ej: Guáimaro">
+  <label>Límite de crédito en CUP (0 = sin límite)</label>
+  <input type="number" id="cliLimite" placeholder="0" min="0">
+  <label>Observaciones (opcional)</label>
+  <textarea id="cliObservaciones" placeholder="Notas sobre el cliente..."></textarea>
+  <button id="btnGuardarCliente">💾 Guardar Cliente</button>
+  <button id="btnEliminarCliente" class="oculto" onclick="eliminarClienteActual()" style="width:100%;margin-top:10px;padding:14px;background:rgba(255,107,74,0.1);border:1px solid rgba(255,107,74,0.25);border-radius:14px;color:var(--warn);font-size:14px;font-weight:600;cursor:pointer;">🗑️ Eliminar Cliente</button>
+</div>
+</div>
+
+<!-- MODAL: REGISTRAR ABONO -->
+<div id="modalAbono" class="modal oculto">
+<div class="modal-contenido">
+  <div class="modal-header">
+    <h2>💵 Registrar Abono</h2>
+    <button class="btn-cerrar" onclick="cerrarModalAbono()">✕</button>
+  </div>
+  <div id="abonoClienteNombre" style="font-size:14px;color:var(--text2);margin-bottom:12px;"></div>
+  <label>Monto del abono *</label>
+  <input type="number" id="abonoMonto" placeholder="0.00" min="0">
+  <label>Fecha</label>
+  <input type="date" id="abonoFecha">
+  <label>Nota (opcional)</label>
+  <input type="text" id="abonoNota" placeholder="Ej: Pagó en efectivo">
+  <button id="btnConfirmarAbono">💵 Confirmar Abono</button>
+</div>
+</div>
+
+<!-- PANTALLA: GASTOS -->
+<div id="pantallaGastos" class="pantalla">
+  <div class="header">
+    <button class="btn-back" onclick="volverInicio()">‹</button>
+    <div class="header-left"><h1>Gastos</h1><p>Control financiero</p></div>
+    <button class="btn-tool" onclick="toggleMenuOpcionesGastos()">⋯</button>
+  </div>
+  <div id="menuOpcionesGastos" class="menu-opciones oculto">
+    <button onclick="exportarGastosExcel()">📊 Exportar Excel</button>
+    <button onclick="exportarGastosPDF()">📄 Exportar PDF</button>
+  </div>
+
+  <!-- Resumen superior -->
+  <div class="gas-resumen-grid">
+    <div class="gas-resumen-card">
+      <span class="gas-resumen-icon">💰</span>
+      <strong id="gasResumenHoy">0</strong>
+      <span>Gastos hoy</span>
+    </div>
+    <div class="gas-resumen-card">
+      <span class="gas-resumen-icon">📅</span>
+      <strong id="gasResumenSemana">0</strong>
+      <span>Gastos semana</span>
+    </div>
+    <div class="gas-resumen-card">
+      <span class="gas-resumen-icon">🗓️</span>
+      <strong id="gasResumenMes">0</strong>
+      <span>Gastos mes</span>
+    </div>
+    <div class="gas-resumen-card gas-resumen-destacada">
+      <span class="gas-resumen-icon">📈</span>
+      <strong id="gasResumenGananciaNeta">0</strong>
+      <span>Ganancia neta mes</span>
+    </div>
+  </div>
+
+  <div style="padding:0 20px 4px;">
+    <button class="alm-btn-transferir" onclick="abrirDashboardFinanciero()">📊 Ver Dashboard Financiero</button>
+  </div>
+
+  <!-- Pendientes recurrentes -->
+  <div id="gasRecurrentesPendientes" class="oculto" style="padding:0 20px 14px;"></div>
+
+  <div class="toolbar">
+    <input type="text" id="buscarGasto" placeholder="🔍 Buscar gasto..." oninput="mostrarGastos()">
+    <div class="toolbar-botones">
+      <select id="filtroCategoriaGasto" class="select-tool" onchange="mostrarGastos()">
+        <option value="">📂 Todas</option>
+        <option value="combustible">⛽ Combustible</option>
+        <option value="transporte">🚚 Transporte</option>
+        <option value="electricidad">⚡ Electricidad</option>
+        <option value="salarios">👷 Salarios</option>
+        <option value="onat">🏛️ ONAT</option>
+        <option value="mantenimiento">🛠️ Mantenimiento</option>
+        <option value="insumos">📦 Insumos</option>
+        <option value="internet">📱 Internet y teléfono</option>
+        <option value="otros">🧾 Otros</option>
+      </select>
+      <select id="filtroPeriodoGasto" class="select-tool" onchange="mostrarGastos()">
+        <option value="">Todos</option>
+        <option value="hoy">Hoy</option>
+        <option value="semana">Esta semana</option>
+        <option value="mes">Este mes</option>
+      </select>
+    </div>
+  </div>
+
+  <div id="listaGastos" style="padding:0 20px 120px; display:flex; flex-direction:column; gap:8px;"></div>
+  <button id="btnNuevoGasto" onclick="abrirModalGasto()">＋</button>
+</div>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!-- PANTALLA: DASHBOARD FINANCIERO                  -->
+<!-- ═══════════════════════════════════════════════ -->
+<div id="pantallaDashboardFinanciero" class="pantalla">
+  <div class="header">
+    <button class="btn-back" onclick="volverGastos()">‹</button>
+    <div class="header-left"><h1>Dashboard Financiero</h1><p id="dashFinSubtitulo">Este mes</p></div>
+  </div>
+  <div class="toolbar" style="padding-bottom:4px;">
+    <div class="toolbar-botones">
+      <button class="chip-filtro activo" data-periodo="mes" onclick="cambiarPeriodoDashFin(this)">Este mes</button>
+      <button class="chip-filtro" data-periodo="semana" onclick="cambiarPeriodoDashFin(this)">Esta semana</button>
+      <button class="chip-filtro" data-periodo="hoy" onclick="cambiarPeriodoDashFin(this)">Hoy</button>
+    </div>
+  </div>
+
+  <div class="dashfin-cascada">
+    <div class="dashfin-row">
+      <span>Ventas totales</span>
+      <strong id="dfVentas">0 CUP</strong>
+    </div>
+    <div class="dashfin-row dashfin-resta">
+      <span>− Costo de mercancía (FIFO real)</span>
+      <strong id="dfCosto">0 CUP</strong>
+    </div>
+    <div class="dashfin-sep"></div>
+    <div class="dashfin-row dashfin-subtotal">
+      <span>= Ganancia bruta</span>
+      <strong id="dfGananciaBruta">0 CUP</strong>
+    </div>
+    <div class="dashfin-row dashfin-resta">
+      <span>− Gastos operativos</span>
+      <strong id="dfGastos">0 CUP</strong>
+    </div>
+    <div class="dashfin-sep"></div>
+    <div class="dashfin-row dashfin-total">
+      <span>= Ganancia neta</span>
+      <strong id="dfGananciaNeta">0 CUP</strong>
+    </div>
+  </div>
+
+  <div class="cfg-grupo-label">GASTOS POR CATEGORÍA</div>
+  <div id="dfGastosPorCategoria" class="cfg-grupo"></div>
+
+  <div class="cfg-grupo-label">GASTOS POR ALMACÉN</div>
+  <div id="dfGastosPorAlmacen" class="cfg-grupo"></div>
+
+  <div style="height:30px"></div>
+</div>
+
+<!-- MODAL: NUEVO / EDITAR GASTO -->
+<div id="modalGasto" class="modal oculto">
+<div class="modal-contenido">
+  <div class="modal-header">
+    <h2 id="modalGastoTitulo">🧾 Nuevo Gasto</h2>
+    <button class="btn-cerrar" onclick="cerrarModalGasto()">✕</button>
+  </div>
+  <label>Concepto *</label>
+  <input type="text" id="gasConcepto" placeholder="Ej: Combustible para moto">
+  <label>Monto *</label>
+  <input type="number" id="gasMonto" placeholder="0.00" min="0">
+  <label>Categoría *</label>
+  <select id="gasCategoria">
+    <option value="">— Seleccionar —</option>
+    <option value="combustible">⛽ Combustible</option>
+    <option value="transporte">🚚 Transporte</option>
+    <option value="electricidad">⚡ Electricidad</option>
+    <option value="salarios">👷 Salarios</option>
+    <option value="onat">🏛️ ONAT</option>
+    <option value="mantenimiento">🛠️ Mantenimiento</option>
+    <option value="insumos">📦 Insumos</option>
+    <option value="internet">📱 Internet y teléfono</option>
+    <option value="otros">🧾 Otros</option>
+  </select>
+  <label>Fecha</label>
+  <input type="date" id="gasFecha">
+  <label>Almacén relacionado (opcional)</label>
+  <select id="gasAlmacen">
+    <option value="">— General / Sin asociar —</option>
+  </select>
+  <label>Número de comprobante / referencia (opcional)</label>
+  <input type="text" id="gasComprobante" placeholder="Ej: Factura #045">
+  <div class="cfg-info-box" style="margin-top:10px;">
+    <span>📷</span>
+    <p>Adjuntar foto del comprobante llegará próximamente. Por ahora usa el campo de referencia.</p>
+  </div>
+  <div class="cfg-toggle-row2" style="padding:10px 0 4px;">
+    <div class="cfg-row-body">
+      <span class="cfg-row-titulo">Gasto recurrente</span>
+      <span class="cfg-row-sub">Se repite cada mes (ej: internet, salario)</span>
+    </div>
+    <label class="cfg-toggle"><input type="checkbox" id="gasRecurrente"><span class="cfg-toggle-slider"></span></label>
+  </div>
+  <label>Nota (opcional)</label>
+  <textarea id="gasNota" placeholder="Observaciones..."></textarea>
+  <button id="btnGuardarGasto">💾 Guardar Gasto</button>
+  <button id="btnEliminarGasto" class="oculto" onclick="eliminarGastoActual()" style="width:100%;margin-top:10px;padding:14px;background:rgba(255,107,74,0.1);border:1px solid rgba(255,107,74,0.25);border-radius:14px;color:var(--warn);font-size:14px;font-weight:600;cursor:pointer;">🗑️ Eliminar Gasto</button>
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!-- PANTALLA: CONFIGURACIÓN (menú principal)       -->
+<!-- ═══════════════════════════════════════════════ -->
+<div id="pantallaConfiguracion" class="pantalla">
+  <div class="header">
+    <button class="btn-back" onclick="volverInicio()">‹</button>
+    <div class="header-left"><h1>Configuración</h1><p>Personaliza tu negocio</p></div>
+  </div>
+  <div class="cfg-main">
+
+    <!-- Tarjeta del negocio -->
+    <div class="cfg-negocio-card" onclick="abrirSubConfig('negocio')">
+      <div class="cfg-negocio-emoji" id="cfgCardEmoji">🏪</div>
+      <div class="cfg-negocio-info">
+        <h3 id="cfgCardNombre">Mi Negocio</h3>
+        <p id="cfgCardSub">Toca para editar · TCP</p>
+      </div>
+      <span class="cfg-row-arrow">›</span>
+    </div>
+
+    <!-- GRUPO: NEGOCIO -->
+    <div class="cfg-grupo-label">🏢 NEGOCIO</div>
+    <div class="cfg-grupo">
+      <div class="cfg-row" onclick="abrirSubConfig('negocio')">
+        <div class="cfg-row-icon" style="background:rgba(0,232,150,0.12)">🏪</div>
+        <div class="cfg-row-body">
+          <span class="cfg-row-titulo">Mi Negocio</span>
+          <span class="cfg-row-sub">Nombre, logo, propietario, contacto</span>
+        </div>
+        <span class="cfg-row-arrow">›</span>
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-row" onclick="abrirSubConfig('inventario')">
+        <div class="cfg-row-icon" style="background:rgba(99,179,237,0.12)">📦</div>
+        <div class="cfg-row-body">
+          <span class="cfg-row-titulo">Inventario</span>
+          <span class="cfg-row-sub">Stock, alertas, categorías, unidades</span>
+        </div>
+        <span class="cfg-row-arrow">›</span>
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-row" onclick="abrirSubConfig('ventas')">
+        <div class="cfg-row-icon" style="background:rgba(245,197,66,0.12)">💰</div>
+        <div class="cfg-row-body">
+          <span class="cfg-row-titulo">Ventas y Movimientos</span>
+          <span class="cfg-row-sub">Pagos, permisos, numeración</span>
+        </div>
+        <span class="cfg-row-arrow">›</span>
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-row" onclick="abrirSubConfig('onat')">
+        <div class="cfg-row-icon" style="background:rgba(251,146,60,0.12)">🏛️</div>
+        <div class="cfg-row-body">
+          <span class="cfg-row-titulo">ONAT / Fiscal</span>
+          <span class="cfg-row-sub">Régimen, registro, actividad</span>
+        </div>
+        <span class="cfg-row-arrow">›</span>
+      </div>
+    </div>
+
+    <!-- GRUPO: HERRAMIENTAS -->
+    <div class="cfg-grupo-label">🛠️ HERRAMIENTAS</div>
+    <div class="cfg-grupo">
+      <div class="cfg-row" onclick="abrirSubConfig('notificaciones')">
+        <div class="cfg-row-icon" style="background:rgba(167,139,250,0.12)">🔔</div>
+        <div class="cfg-row-body">
+          <span class="cfg-row-titulo">Notificaciones</span>
+          <span class="cfg-row-sub">Stock bajo, vencimientos, alertas</span>
+        </div>
+        <span class="cfg-row-arrow">›</span>
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-row" onclick="abrirSubConfig('seguridad')">
+        <div class="cfg-row-icon" style="background:rgba(167,139,250,0.12)">🔒</div>
+        <div class="cfg-row-body">
+          <span class="cfg-row-titulo">Seguridad</span>
+          <span class="cfg-row-sub">PIN de acceso, privacidad</span>
+        </div>
+        <span class="cfg-row-arrow">›</span>
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-row" onclick="abrirSubConfig('respaldo')">
+        <div class="cfg-row-icon" style="background:rgba(245,197,66,0.12)">☁️</div>
+        <div class="cfg-row-body">
+          <span class="cfg-row-titulo">Respaldo y Datos</span>
+          <span class="cfg-row-sub">Exportar, restaurar, reiniciar</span>
+        </div>
+        <span class="cfg-row-arrow">›</span>
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-row" onclick="abrirSubConfig('exportar')">
+        <div class="cfg-row-icon" style="background:rgba(0,232,150,0.12)">📊</div>
+        <div class="cfg-row-body">
+          <span class="cfg-row-titulo">Exportar y Reportes</span>
+          <span class="cfg-row-sub">PDF, Excel, WhatsApp, imprimir</span>
+        </div>
+        <span class="cfg-row-arrow">›</span>
+      </div>
+    </div>
+
+    <!-- GRUPO: PERSONALIZACIÓN -->
+    <div class="cfg-grupo-label">🎨 PERSONALIZACIÓN</div>
+    <div class="cfg-grupo">
+      <div class="cfg-row" onclick="abrirSubConfig('apariencia')">
+        <div class="cfg-row-icon" style="background:rgba(45,212,191,0.12)">🎨</div>
+        <div class="cfg-row-body">
+          <span class="cfg-row-titulo">Apariencia</span>
+          <span class="cfg-row-sub">Tema, tamaño de texto, animaciones</span>
+        </div>
+        <span class="cfg-row-arrow">›</span>
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-row" onclick="abrirSubConfig('idioma')">
+        <div class="cfg-row-icon" style="background:rgba(99,179,237,0.12)">🌎</div>
+        <div class="cfg-row-body">
+          <span class="cfg-row-titulo">Idioma y Región</span>
+          <span class="cfg-row-sub">Español · Formato de fecha y moneda</span>
+        </div>
+        <span class="cfg-row-arrow">›</span>
+      </div>
+    </div>
+
+    <!-- GRUPO: INFORMACIÓN -->
+    <div class="cfg-grupo-label">ℹ️ INFORMACIÓN</div>
+    <div class="cfg-grupo">
+      <div class="cfg-row cfg-row-pro" onclick="abrirSubConfig('pro')">
+        <div class="cfg-row-icon" style="background:rgba(245,197,66,0.15)">⭐</div>
+        <div class="cfg-row-body">
+          <span class="cfg-row-titulo" style="color:var(--gold)">Desbloquear PRO</span>
+          <span class="cfg-row-sub">Reportes avanzados, multi-usuario, sin límites</span>
+        </div>
+        <span class="cfg-row-arrow" style="color:var(--gold)">›</span>
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-row" onclick="abrirSubConfig('acerca')">
+        <div class="cfg-row-icon" style="background:rgba(0,232,150,0.12)">ℹ️</div>
+        <div class="cfg-row-body">
+          <span class="cfg-row-titulo">Acerca de</span>
+          <span class="cfg-row-sub">Versión 1.0.0 · INVENTARY ARB</span>
+        </div>
+        <span class="cfg-row-arrow">›</span>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="cfg-footer">
+      <p>INVENTARY ARB · Versión 1.0.0 (Build 001)</p>
+      <p>© 2026 · Hecho para negocios cubanos</p>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!-- SUBPANTALLAS DE CONFIGURACIÓN                  -->
+<!-- ═══════════════════════════════════════════════ -->
+
+<!-- SUB: MI NEGOCIO -->
+<div id="subNegocio" class="pantalla">
+  <div class="header">
+    <button class="btn-back" onclick="volverConfig()">‹</button>
+    <div class="header-left"><h1>Mi Negocio</h1><p>Datos del establecimiento</p></div>
+    <button class="cfg-btn-save-top" onclick="guardarNegocio()">Guardar</button>
+  </div>
+  <div class="sub-contenido">
+    <!-- Selector de emoji compacto -->
+    <div class="cfg-grupo-label">ÍCONO DEL NEGOCIO</div>
+    <div class="cfg-grupo">
+      <div class="cfg-emoji-selector">
+        <div class="cfg-emoji-grande" id="subEmojiPreview">🏪</div>
+        <div class="cfg-emoji-scroll" id="subEmojiScroll"></div>
+        <input type="hidden" id="subEmoji">
+      </div>
+    </div>
+
+    <div class="cfg-grupo-label">IDENTIDAD</div>
+    <div class="cfg-grupo">
+      <div class="cfg-input-row">
+        <span class="cfg-input-label">Nombre del negocio</span>
+        <input type="text" id="subNombreNegocio" placeholder="Ej: Bodega El Progreso" class="cfg-input-inline">
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-input-row">
+        <span class="cfg-input-label">Propietario</span>
+        <input type="text" id="subPropietario" placeholder="Nombre completo" class="cfg-input-inline">
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-input-row">
+        <span class="cfg-input-label">Teléfono</span>
+        <input type="tel" id="subTelefono" placeholder="52345678" class="cfg-input-inline">
+      </div>
+    </div>
+
+    <div class="cfg-grupo-label">UBICACIÓN</div>
+    <div class="cfg-grupo">
+      <div class="cfg-input-row">
+        <span class="cfg-input-label">Dirección</span>
+        <input type="text" id="subDireccion" placeholder="Calle y número" class="cfg-input-inline">
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-input-row">
+        <span class="cfg-input-label">Municipio</span>
+        <input type="text" id="subMunicipio" placeholder="Ej: Guáimaro" class="cfg-input-inline">
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-input-row">
+        <span class="cfg-input-label">Provincia</span>
+        <select id="subProvincia" class="cfg-select-inline">
+          <option value="">— Seleccionar —</option>
+          <option>Pinar del Río</option><option>Artemisa</option><option>La Habana</option>
+          <option>Mayabeque</option><option>Matanzas</option><option>Cienfuegos</option>
+          <option>Villa Clara</option><option>Sancti Spíritus</option><option>Ciego de Ávila</option>
+          <option>Camagüey</option><option>Las Tunas</option><option>Holguín</option>
+          <option>Granma</option><option>Santiago de Cuba</option><option>Guantánamo</option>
+          <option>Isla de la Juventud</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="cfg-grupo-label">DOCUMENTOS</div>
+    <div class="cfg-grupo">
+      <div class="cfg-input-row">
+        <span class="cfg-input-label">Moneda principal</span>
+        <select id="subMoneda" class="cfg-select-inline">
+          <option value="CUP">CUP — Peso Cubano</option>
+          <option value="USD">USD — Dólar</option>
+          <option value="MLC">MLC — Moneda Convertible</option>
+          <option value="EUR">EUR — Euro</option>
+        </select>
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-input-row">
+        <span class="cfg-input-label">Pie de página PDF</span>
+        <input type="text" id="subPiePagina" placeholder="Gracias por su compra" class="cfg-input-inline">
+      </div>
+    </div>
+    <div style="height:30px"></div>
+  </div>
+</div>
+
+<!-- SUB: INVENTARIO -->
+<div id="subInventario" class="pantalla">
+  <div class="header">
+    <button class="btn-back" onclick="volverConfig()">‹</button>
+    <div class="header-left"><h1>Inventario</h1><p>Reglas y comportamiento</p></div>
+    <button class="cfg-btn-save-top" onclick="guardarInventario()">Guardar</button>
+  </div>
+  <div class="sub-contenido">
+    <div class="cfg-grupo-label">MÉTODO DE COSTO</div>
+    <div class="cfg-grupo">
+      <div class="cfg-row cfg-row-check activo-check" style="cursor:default;">
+        <div class="cfg-row-body"><span class="cfg-row-titulo">FIFO — Primero en entrar, primero en salir</span><span class="cfg-row-sub">Cada entrada guarda su costo real. Las salidas consumen el lote más antiguo primero.</span></div>
+        <span class="cfg-check-mark">✓</span>
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-row cfg-row-disabled">
+        <div class="cfg-row-body"><span class="cfg-row-titulo">Promedio ponderado</span><span class="cfg-row-sub">Mezcla todos los costos en uno solo</span></div>
+        <span class="cfg-badge-pronto">Pronto</span>
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-row cfg-row-disabled">
+        <div class="cfg-row-body"><span class="cfg-row-titulo">LIFO — Último en entrar, primero en salir</span></div>
+        <span class="cfg-badge-pronto">Pronto</span>
+      </div>
+    </div>
+    <div class="cfg-hint" style="padding:6px 20px 0;">Aplica solo a productos creados a partir de ahora. Es el método más preciso para reflejar la inflación de precios.</div>
+
+    <div class="cfg-grupo-label">STOCK</div>
+    <div class="cfg-grupo">
+      <div class="cfg-input-row">
+        <span class="cfg-input-label">Stock mínimo global</span>
+        <input type="number" id="subStockMinimo" placeholder="5" min="0" class="cfg-input-num">
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-toggle-row2">
+        <div class="cfg-row-body">
+          <span class="cfg-row-titulo">Alertas de stock bajo</span>
+          <span class="cfg-row-sub">Mostrar ⚠️ en productos con stock bajo</span>
+        </div>
+        <label class="cfg-toggle"><input type="checkbox" id="subAlertasStock"><span class="cfg-toggle-slider"></span></label>
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-toggle-row2">
+        <div class="cfg-row-body">
+          <span class="cfg-row-titulo">Mostrar productos agotados</span>
+          <span class="cfg-row-sub">Incluir productos con stock 0</span>
+        </div>
+        <label class="cfg-toggle"><input type="checkbox" id="subMostrarAgotados" checked><span class="cfg-toggle-slider"></span></label>
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-toggle-row2">
+        <div class="cfg-row-body">
+          <span class="cfg-row-titulo">Alerta de vencimiento</span>
+          <span class="cfg-row-sub">Avisar cuando un producto está por vencer</span>
+        </div>
+        <label class="cfg-toggle"><input type="checkbox" id="subAlertaVencimiento" checked><span class="cfg-toggle-slider"></span></label>
+      </div>
+    </div>
+
+    <div class="cfg-grupo-label">VISTA</div>
+    <div class="cfg-grupo">
+      <div class="cfg-toggle-row2">
+        <div class="cfg-row-body">
+          <span class="cfg-row-titulo">Vista por defecto: Lista</span>
+          <span class="cfg-row-sub">Abrir en vista lista en vez de tarjetas</span>
+        </div>
+        <label class="cfg-toggle"><input type="checkbox" id="subVistaLista"><span class="cfg-toggle-slider"></span></label>
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-toggle-row2">
+        <div class="cfg-row-body">
+          <span class="cfg-row-titulo">Agrupar por categoría</span>
+          <span class="cfg-row-sub">Mostrar productos agrupados al abrir</span>
+        </div>
+        <label class="cfg-toggle"><input type="checkbox" id="subAgruparCategoria"><span class="cfg-toggle-slider"></span></label>
+      </div>
+    </div>
+
+    <div class="cfg-grupo-label">PERSONALIZACIÓN</div>
+    <div class="cfg-grupo">
+      <div class="cfg-row" onclick="proximamente('Categorías personalizadas')">
+        <div class="cfg-row-body"><span class="cfg-row-titulo">Categorías personalizadas</span><span class="cfg-row-sub">Crear tus propias categorías</span></div>
+        <span class="cfg-row-arrow">›</span>
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-row" onclick="proximamente('Unidades personalizadas')">
+        <div class="cfg-row-body"><span class="cfg-row-titulo">Unidades personalizadas</span><span class="cfg-row-sub">Agregar unidades de medida propias</span></div>
+        <span class="cfg-row-arrow">›</span>
+      </div>
+    </div>
+    <div style="height:30px"></div>
+  </div>
+</div>
+
+<!-- SUB: VENTAS Y MOVIMIENTOS -->
+<div id="subVentas" class="pantalla">
+  <div class="header">
+    <button class="btn-back" onclick="volverConfig()">‹</button>
+    <div class="header-left"><h1>Ventas</h1><p>Movimientos y permisos</p></div>
+    <button class="cfg-btn-save-top" onclick="guardarVentas()">Guardar</button>
+  </div>
+  <div class="sub-contenido">
+    <div class="cfg-grupo-label">VENTAS</div>
+    <div class="cfg-grupo">
+      <div class="cfg-input-row">
+        <span class="cfg-input-label">Método de pago predeterminado</span>
+        <select id="subMetodoPago" class="cfg-select-inline">
+          <option value="efectivo">💵 Efectivo</option>
+          <option value="transfermovil">📱 Transfermóvil</option>
+          <option value="enzona">💳 EnZona</option>
+          <option value="transferencia">🏦 Transferencia bancaria</option>
+          <option value="fiado">📦 Crédito / Fiado</option>
+        </select>
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-toggle-row2">
+        <div class="cfg-row-body">
+          <span class="cfg-row-titulo">Ventas sin stock</span>
+          <span class="cfg-row-sub">Permitir registrar salidas con stock en 0</span>
+        </div>
+        <label class="cfg-toggle"><input type="checkbox" id="subVentasSinStock"><span class="cfg-toggle-slider"></span></label>
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-toggle-row2">
+        <div class="cfg-row-body">
+          <span class="cfg-row-titulo">Solicitar cliente en ventas</span>
+          <span class="cfg-row-sub">Pedir nombre del cliente al registrar salida</span>
+        </div>
+        <label class="cfg-toggle"><input type="checkbox" id="subSolicitarCliente"><span class="cfg-toggle-slider"></span></label>
+      </div>
+    </div>
+
+    <div class="cfg-grupo-label">FACTURAS</div>
+    <div class="cfg-grupo">
+      <div class="cfg-toggle-row2">
+        <div class="cfg-row-body">
+          <span class="cfg-row-titulo">Numeración automática</span>
+          <span class="cfg-row-sub">Generar número de factura automáticamente</span>
+        </div>
+        <label class="cfg-toggle"><input type="checkbox" id="subNumAuto" checked><span class="cfg-toggle-slider"></span></label>
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-input-row">
+        <span class="cfg-input-label">Próximo número de factura</span>
+        <input type="number" id="subProxFactura" placeholder="001" min="1" class="cfg-input-num">
+      </div>
+    </div>
+    <div style="height:30px"></div>
+  </div>
+</div>
+
+<!-- SUB: ONAT -->
+<div id="subOnat" class="pantalla">
+  <div class="header">
+    <button class="btn-back" onclick="volverConfig()">‹</button>
+    <div class="header-left"><h1>ONAT / Fiscal</h1><p>Datos tributarios TCP</p></div>
+    <button class="cfg-btn-save-top" onclick="guardarOnat()">Guardar</button>
+  </div>
+  <div class="sub-contenido">
+    <div class="cfg-grupo-label">RÉGIMEN FISCAL</div>
+    <div class="cfg-grupo">
+      <div class="cfg-input-row">
+        <span class="cfg-input-label">Régimen tributario</span>
+        <select id="subRegimen" class="cfg-select-inline">
+          <option value="TCP">TCP — Cuenta Propia</option>
+          <option value="CNA">CNA — Cooperativa</option>
+          <option value="MIPYME">MIPYME</option>
+          <option value="Estatal">Empresa Estatal</option>
+        </select>
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-input-row">
+        <span class="cfg-input-label">Número de registro ONAT</span>
+        <input type="text" id="subNumONAT" placeholder="12345678-9" class="cfg-input-inline">
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-input-row">
+        <span class="cfg-input-label">Actividad económica</span>
+        <input type="text" id="subActividad" placeholder="Venta de mercancías" class="cfg-input-inline">
+      </div>
+    </div>
+
+    <div class="cfg-grupo-label">IMPUESTOS</div>
+    <div class="cfg-grupo">
+      <div class="cfg-toggle-row2">
+        <div class="cfg-row-body">
+          <span class="cfg-row-titulo">Calcular impuesto automático</span>
+          <span class="cfg-row-sub">Aplicar % en reportes de ventas</span>
+        </div>
+        <label class="cfg-toggle"><input type="checkbox" id="subImpuestoAuto"><span class="cfg-toggle-slider"></span></label>
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-input-row">
+        <span class="cfg-input-label">Porcentaje de impuesto (%)</span>
+        <input type="number" id="subPorcentajeImpuesto" placeholder="10" min="0" max="100" class="cfg-input-num">
+      </div>
+    </div>
+
+    <div class="cfg-grupo-label">REPORTES</div>
+    <div class="cfg-grupo">
+      <div class="cfg-row" onclick="proximamente('Exportar declaración ONAT')">
+        <div class="cfg-row-body"><span class="cfg-row-titulo">Exportar declaración</span><span class="cfg-row-sub">Generar reporte fiscal mensual</span></div>
+        <span class="cfg-badge-pronto">Próximamente</span>
+      </div>
+    </div>
+    <div style="height:30px"></div>
+  </div>
+</div>
+
+<!-- SUB: NOTIFICACIONES -->
+<div id="subNotificaciones" class="pantalla">
+  <div class="header">
+    <button class="btn-back" onclick="volverConfig()">‹</button>
+    <div class="header-left"><h1>Notificaciones</h1><p>Alertas y avisos</p></div>
+    <button class="cfg-btn-save-top" onclick="guardarNotificaciones()">Guardar</button>
+  </div>
+  <div class="sub-contenido">
+    <div class="cfg-grupo-label">PERMISO</div>
+    <div class="cfg-grupo">
+      <div class="cfg-info-box2">
+        <span>🔔</span>
+        <p>Las notificaciones funcionan cuando la app está abierta. Al instalar como APK funcionarán en segundo plano.</p>
+      </div>
+      <div class="cfg-row-sep"></div>
+      <button class="cfg-btn-accion" onclick="solicitarPermisoNotificaciones()">🔔 Activar notificaciones del sistema</button>
+    </div>
+
+    <div class="cfg-grupo-label">ALERTAS DE STOCK</div>
+    <div class="cfg-grupo">
+      <div class="cfg-toggle-row2">
+        <div class="cfg-row-body">
+          <span class="cfg-row-titulo">Stock bajo al abrir app</span>
+          <span class="cfg-row-sub">Notificar productos por debajo del mínimo</span>
+        </div>
+        <label class="cfg-toggle"><input type="checkbox" id="subNotifStockBajo" checked><span class="cfg-toggle-slider"></span></label>
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-toggle-row2">
+        <div class="cfg-row-body">
+          <span class="cfg-row-titulo">Notificar al registrar salida</span>
+          <span class="cfg-row-sub">Avisar si el stock queda bajo tras una venta</span>
+        </div>
+        <label class="cfg-toggle"><input type="checkbox" id="subNotifAlSalida" checked><span class="cfg-toggle-slider"></span></label>
+      </div>
+    </div>
+
+    <div class="cfg-grupo-label">VENCIMIENTOS</div>
+    <div class="cfg-grupo">
+      <div class="cfg-toggle-row2">
+        <div class="cfg-row-body">
+          <span class="cfg-row-titulo">Productos próximos a vencer</span>
+          <span class="cfg-row-sub">Avisar con días de anticipación</span>
+        </div>
+        <label class="cfg-toggle"><input type="checkbox" id="subNotifVencimiento" checked><span class="cfg-toggle-slider"></span></label>
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-input-row">
+        <span class="cfg-input-label">Días de anticipación</span>
+        <input type="number" id="subDiasVencimiento" placeholder="7" min="1" max="90" class="cfg-input-num">
+      </div>
+    </div>
+
+    <div class="cfg-grupo-label">PRUEBA</div>
+    <div class="cfg-grupo">
+      <button class="cfg-btn-accion" onclick="probarNotificacion()">🧪 Enviar notificación de prueba</button>
+    </div>
+    <div style="height:30px"></div>
+  </div>
+</div>
+
+<!-- SUB: SEGURIDAD -->
+<div id="subSeguridad" class="pantalla">
+  <div class="header">
+    <button class="btn-back" onclick="volverConfig()">‹</button>
+    <div class="header-left"><h1>Seguridad</h1><p>Protege tu información</p></div>
+    <button class="cfg-btn-save-top" onclick="guardarSeguridad()">Guardar</button>
+  </div>
+  <div class="sub-contenido">
+    <div class="cfg-grupo-label">ACCESO</div>
+    <div class="cfg-grupo">
+      <div class="cfg-toggle-row2">
+        <div class="cfg-row-body">
+          <span class="cfg-row-titulo">PIN de acceso</span>
+          <span class="cfg-row-sub">Solicitar PIN al abrir la aplicación</span>
+        </div>
+        <label class="cfg-toggle"><input type="checkbox" id="subPinActivo" onchange="toggleSubPin()"><span class="cfg-toggle-slider"></span></label>
+      </div>
+      <div id="subPinCampos" class="oculto">
+        <div class="cfg-row-sep"></div>
+        <div class="cfg-input-row">
+          <span class="cfg-input-label">PIN (4 dígitos)</span>
+          <input type="password" id="subPin" placeholder="••••" maxlength="4" inputmode="numeric" class="cfg-input-num">
+        </div>
+        <div class="cfg-row-sep"></div>
+        <div class="cfg-input-row">
+          <span class="cfg-input-label">Confirmar PIN</span>
+          <input type="password" id="subPinConfirm" placeholder="••••" maxlength="4" inputmode="numeric" class="cfg-input-num">
+        </div>
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-input-row">
+        <span class="cfg-input-label">Bloqueo automático</span>
+        <select id="subBloqueoAuto" class="cfg-select-inline">
+          <option value="0">Nunca</option>
+          <option value="1">Al salir de la app</option>
+          <option value="5">Después de 5 min</option>
+          <option value="15">Después de 15 min</option>
+          <option value="30">Después de 30 min</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="cfg-grupo-label">PRIVACIDAD</div>
+    <div class="cfg-grupo">
+      <div class="cfg-toggle-row2">
+        <div class="cfg-row-body">
+          <span class="cfg-row-titulo">Ocultar precios de compra</span>
+          <span class="cfg-row-sub">No mostrar costos en la vista de inventario</span>
+        </div>
+        <label class="cfg-toggle"><input type="checkbox" id="subOcultarCompra"><span class="cfg-toggle-slider"></span></label>
+      </div>
+    </div>
+
+    <div class="cfg-grupo-label">PRÓXIMAMENTE</div>
+    <div class="cfg-grupo">
+      <div class="cfg-row cfg-row-disabled">
+        <div class="cfg-row-icon" style="background:rgba(167,139,250,0.08)">🖐️</div>
+        <div class="cfg-row-body"><span class="cfg-row-titulo">Huella digital</span><span class="cfg-row-sub">Requiere app nativa Android</span></div>
+        <span class="cfg-badge-pronto">Pronto</span>
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-row cfg-row-disabled">
+        <div class="cfg-row-icon" style="background:rgba(167,139,250,0.08)">👥</div>
+        <div class="cfg-row-body"><span class="cfg-row-titulo">Control de usuarios</span><span class="cfg-row-sub">Múltiples perfiles con permisos</span></div>
+        <span class="cfg-badge-pronto">PRO</span>
+      </div>
+    </div>
+    <div style="height:30px"></div>
+  </div>
+</div>
+
+<!-- SUB: RESPALDO -->
+<div id="subRespaldo" class="pantalla">
+  <div class="header">
+    <button class="btn-back" onclick="volverConfig()">‹</button>
+    <div class="header-left"><h1>Respaldo y Datos</h1><p>Protege tu información</p></div>
+  </div>
+  <div class="sub-contenido">
+    <div class="cfg-grupo-label">ESTADO</div>
+    <div class="cfg-grupo">
+      <div class="cfg-info-box2">
+        <span>⚠️</span>
+        <p>Tus datos están en el navegador. Si limpias el caché los perderás. Haz respaldo regularmente.</p>
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-input-row">
+        <span class="cfg-input-label">Último respaldo</span>
+        <span class="cfg-valor-readonly" id="subUltimoRespaldo">Nunca</span>
+      </div>
+    </div>
+
+    <div class="cfg-grupo-label">COPIA DE SEGURIDAD</div>
+    <div class="cfg-grupo">
+      <button class="cfg-btn-accion cfg-btn-gold2" onclick="exportarRespaldo()">📤 Exportar respaldo completo</button>
+      <div class="cfg-row-sep"></div>
+      <button class="cfg-btn-accion" onclick="document.getElementById('archivoRespaldo').click()">📥 Restaurar desde archivo</button>
+      <input type="file" id="archivoRespaldo" accept=".json" style="display:none" onchange="importarRespaldo(event)">
+    </div>
+
+    <div class="cfg-grupo-label">PRÓXIMAMENTE</div>
+    <div class="cfg-grupo">
+      <div class="cfg-row cfg-row-disabled">
+        <div class="cfg-row-icon" style="font-size:20px;width:36px;height:36px;display:flex;align-items:center;justify-content:center">🔵</div>
+        <div class="cfg-row-body"><span class="cfg-row-titulo">Google Drive</span><span class="cfg-row-sub">Respaldo automático en la nube</span></div>
+        <span class="cfg-badge-pronto">Pronto</span>
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-row cfg-row-disabled">
+        <div class="cfg-row-icon" style="font-size:20px;width:36px;height:36px;display:flex;align-items:center;justify-content:center">🟦</div>
+        <div class="cfg-row-body"><span class="cfg-row-titulo">OneDrive</span><span class="cfg-row-sub">Respaldo automático en la nube</span></div>
+        <span class="cfg-badge-pronto">Pronto</span>
+      </div>
+    </div>
+
+    <div class="cfg-grupo-label">ZONA DE PELIGRO</div>
+    <div class="cfg-grupo">
+      <button class="cfg-btn-accion cfg-btn-danger2" onclick="confirmarBorrarSoloProductos()">🧹 Borrar solo productos y movimientos</button>
+      <div class="cfg-row-sep"></div>
+      <button class="cfg-btn-accion cfg-btn-danger2" onclick="confirmarBorrarDatos()">🗑️ Borrar todos los datos (incluye configuración)</button>
+    </div>
+    <div style="height:30px"></div>
+  </div>
+</div>
+
+<!-- SUB: EXPORTAR Y REPORTES -->
+<div id="subExportar" class="pantalla">
+  <div class="header">
+    <button class="btn-back" onclick="volverConfig()">‹</button>
+    <div class="header-left"><h1>Exportar</h1><p>Reportes y compartir</p></div>
+  </div>
+  <div class="sub-contenido">
+    <div class="cfg-grupo-label">EXPORTAR INVENTARIO</div>
+    <div class="cfg-grupo">
+      <button class="cfg-btn-accion" onclick="exportarPDF()">📄 Exportar PDF</button>
+      <div class="cfg-row-sep"></div>
+      <button class="cfg-btn-accion" onclick="exportarExcel()">📊 Exportar Excel / CSV</button>
+      <div class="cfg-row-sep"></div>
+      <button class="cfg-btn-accion" onclick="imprimirInventario()">🖨️ Imprimir inventario</button>
+      <div class="cfg-row-sep"></div>
+      <button class="cfg-btn-accion" onclick="compartirWhatsApp()">💬 Compartir por WhatsApp</button>
+    </div>
+
+    <div class="cfg-grupo-label">IMPORTAR</div>
+    <div class="cfg-grupo">
+      <button class="cfg-btn-accion" onclick="importarCSV()">📥 Importar desde Excel / CSV</button>
+    </div>
+
+    <div class="cfg-grupo-label">REPORTES AVANZADOS</div>
+    <div class="cfg-grupo">
+      <div class="cfg-row cfg-row-disabled">
+        <div class="cfg-row-body"><span class="cfg-row-titulo">Reporte mensual de ventas</span><span class="cfg-row-sub">Estadísticas y gráficos</span></div>
+        <span class="cfg-badge-pronto">PRO</span>
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-row cfg-row-disabled">
+        <div class="cfg-row-body"><span class="cfg-row-titulo">Declaración ONAT</span><span class="cfg-row-sub">Reporte fiscal para TCP</span></div>
+        <span class="cfg-badge-pronto">Pronto</span>
+      </div>
+    </div>
+    <div style="height:30px"></div>
+  </div>
+</div>
+
+<!-- SUB: APARIENCIA -->
+<div id="subApariencia" class="pantalla">
+  <div class="header">
+    <button class="btn-back" onclick="volverConfig()">‹</button>
+    <div class="header-left"><h1>Apariencia</h1><p>Personaliza el look</p></div>
+    <button class="cfg-btn-save-top" onclick="guardarApariencia()">Guardar</button>
+  </div>
+  <div class="sub-contenido">
+    <div class="cfg-grupo-label">TEMA</div>
+    <div class="cfg-grupo">
+      <div class="cfg-row cfg-row-check activo-check" id="temaOscuroRow" onclick="seleccionarTema('oscuro')">
+        <div class="cfg-row-body"><span class="cfg-row-titulo">🌙 Tema Oscuro</span><span class="cfg-row-sub">Fondo negro con acento verde</span></div>
+        <span class="cfg-check-mark" id="checkOscuro">✓</span>
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-row cfg-row-disabled" id="temaClaro">
+        <div class="cfg-row-body"><span class="cfg-row-titulo">🌞 Tema Claro</span><span class="cfg-row-sub">Diseño claro moderno</span></div>
+        <span class="cfg-badge-pronto">Pronto</span>
+      </div>
+    </div>
+
+    <div class="cfg-grupo-label">TEXTO</div>
+    <div class="cfg-grupo">
+      <div class="cfg-input-row">
+        <span class="cfg-input-label">Tamaño de texto</span>
+        <select id="subTamanoTexto" class="cfg-select-inline">
+          <option value="normal">Normal</option>
+          <option value="grande">Grande</option>
+          <option value="muy-grande">Muy grande</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="cfg-grupo-label">EFECTOS</div>
+    <div class="cfg-grupo">
+      <div class="cfg-toggle-row2">
+        <div class="cfg-row-body">
+          <span class="cfg-row-titulo">Animaciones</span>
+          <span class="cfg-row-sub">Transiciones y efectos visuales</span>
+        </div>
+        <label class="cfg-toggle"><input type="checkbox" id="subAnimaciones" checked><span class="cfg-toggle-slider"></span></label>
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-toggle-row2">
+        <div class="cfg-row-body">
+          <span class="cfg-row-titulo">Fondo con glow</span>
+          <span class="cfg-row-sub">Efecto de iluminación en el fondo</span>
+        </div>
+        <label class="cfg-toggle"><input type="checkbox" id="subGlow" checked><span class="cfg-toggle-slider"></span></label>
+      </div>
+    </div>
+    <div style="height:30px"></div>
+  </div>
+</div>
+
+<!-- SUB: IDIOMA Y REGIÓN -->
+<div id="subIdioma" class="pantalla">
+  <div class="header">
+    <button class="btn-back" onclick="volverConfig()">‹</button>
+    <div class="header-left"><h1>Idioma y Región</h1><p>Formato y localización</p></div>
+    <button class="cfg-btn-save-top" onclick="guardarIdioma()">Guardar</button>
+  </div>
+  <div class="sub-contenido">
+    <div class="cfg-grupo-label">IDIOMA</div>
+    <div class="cfg-grupo">
+      <div class="cfg-row cfg-row-check activo-check">
+        <div class="cfg-row-body"><span class="cfg-row-titulo">🇨🇺 Español</span><span class="cfg-row-sub">Idioma actual</span></div>
+        <span class="cfg-check-mark">✓</span>
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-row cfg-row-disabled">
+        <div class="cfg-row-body"><span class="cfg-row-titulo">🇺🇸 English</span><span class="cfg-row-sub">Próximamente</span></div>
+        <span class="cfg-badge-pronto">Pronto</span>
+      </div>
+    </div>
+
+    <div class="cfg-grupo-label">FORMATO</div>
+    <div class="cfg-grupo">
+      <div class="cfg-input-row">
+        <span class="cfg-input-label">Formato de fecha</span>
+        <select id="subFormatoFecha" class="cfg-select-inline">
+          <option value="dd/mm/yyyy">DD/MM/AAAA</option>
+          <option value="mm/dd/yyyy">MM/DD/AAAA</option>
+          <option value="yyyy-mm-dd">AAAA-MM-DD</option>
+        </select>
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-input-row">
+        <span class="cfg-input-label">Separador decimal</span>
+        <select id="subSeparadorDecimal" class="cfg-select-inline">
+          <option value="punto">Punto (1,234.56)</option>
+          <option value="coma">Coma (1.234,56)</option>
+        </select>
+      </div>
+    </div>
+    <div style="height:30px"></div>
+  </div>
+</div>
+
+<!-- SUB: PRO -->
+<div id="subPro" class="pantalla">
+  <div class="header">
+    <button class="btn-back" onclick="volverConfig()">‹</button>
+    <div class="header-left"><h1>PRO</h1><p>Funciones avanzadas</p></div>
+  </div>
+  <div class="sub-contenido">
+    <div class="cfg-pro-hero">
+      <div class="cfg-pro-icon">⭐</div>
+      <h2>INVENTARY ARB PRO</h2>
+      <p>Desbloquea todo el potencial de tu negocio</p>
+    </div>
+    <div class="cfg-grupo">
+      <div class="cfg-row"><div class="cfg-row-body"><span class="cfg-row-titulo">📊 Reportes gráficos</span><span class="cfg-row-sub">Estadísticas visuales de ventas y stock</span></div></div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-row"><div class="cfg-row-body"><span class="cfg-row-titulo">👥 Multi-usuario</span><span class="cfg-row-sub">Varios empleados con permisos distintos</span></div></div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-row"><div class="cfg-row-body"><span class="cfg-row-titulo">🏪 Múltiples almacenes</span><span class="cfg-row-sub">Gestiona varias sucursales</span></div></div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-row"><div class="cfg-row-body"><span class="cfg-row-titulo">☁️ Respaldo en la nube</span><span class="cfg-row-sub">Google Drive y OneDrive automático</span></div></div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-row"><div class="cfg-row-body"><span class="cfg-row-titulo">🏛️ Declaración ONAT</span><span class="cfg-row-sub">Exportar reportes fiscales TCP</span></div></div>
+    </div>
+    <button class="cfg-btn-pro" onclick="proximamente('PRO')">⭐ Próximamente disponible</button>
+    <div style="height:90px"></div>
+  </div>
+</div>
+
+<!-- SUB: ACERCA DE -->
+<div id="subAcerca" class="pantalla">
+  <div class="header">
+    <button class="btn-back" onclick="volverConfig()">‹</button>
+    <div class="header-left"><h1>Acerca de</h1><p>Información de la app</p></div>
+  </div>
+  <div class="sub-contenido">
+    <div class="cfg-about-hero">
+      <div class="cfg-about-logo-big">INVENTARY ARB</div>
+      <div class="cfg-about-v">Versión 1.0.0 · Build 001</div>
+      <div class="cfg-about-desc2">Control de inventario profesional para negocios cubanos con módulo ONAT/TCP integrado.</div>
+    </div>
+    <div class="cfg-grupo">
+      <div class="cfg-row"><div class="cfg-row-body"><span class="cfg-row-titulo">📦 Inventario</span><span class="cfg-row-sub">Gestión completa de productos y stock</span></div></div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-row"><div class="cfg-row-body"><span class="cfg-row-titulo">🔄 Movimientos</span><span class="cfg-row-sub">Entradas, salidas y ajustes</span></div></div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-row"><div class="cfg-row-body"><span class="cfg-row-titulo">🏛️ ONAT / TCP</span><span class="cfg-row-sub">Módulo fiscal cubano</span></div></div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-row"><div class="cfg-row-body"><span class="cfg-row-titulo">💾 Respaldo</span><span class="cfg-row-sub">Exportación e importación de datos</span></div></div>
+    </div>
+    <div class="cfg-grupo-label">LEGAL</div>
+    <div class="cfg-grupo">
+      <div class="cfg-row" onclick="proximamente('Política de privacidad')"><div class="cfg-row-body"><span class="cfg-row-titulo">Política de privacidad</span></div><span class="cfg-row-arrow">›</span></div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-row" onclick="proximamente('Términos de uso')"><div class="cfg-row-body"><span class="cfg-row-titulo">Términos de uso</span></div><span class="cfg-row-arrow">›</span></div>
+    </div>
+    <div class="cfg-footer">
+      <p>© 2026 INVENTARY ARB</p>
+      <p>Hecho con ❤️ para negocios cubanos</p>
+    </div>
+    <div style="height:30px"></div>
+  </div>
+</div>
+
+<!-- MODALES EXISTENTES -->
+<div id="modalAjuste" class="modal oculto">
+<div class="modal-contenido">
+  <div class="modal-header"><h2>🔢 Ajuste de Stock</h2><button class="btn-cerrar" onclick="cerrarAjuste()">✕</button></div>
+  <div class="info-producto">
+    <div class="info-prod-row"><span>Producto:</span><strong id="ajusteNombre">—</strong></div>
+    <div class="info-prod-row"><span>Stock actual:</span><strong id="ajusteStockActual">—</strong></div>
+  </div>
+  <label>Tipo de ajuste</label>
+  <select id="ajusteTipo">
+    <option value="cantidad_real">🔢 Establecer cantidad real</option>
+    <option value="agregar">➕ Agregar unidades</option>
+    <option value="restar">➖ Restar unidades</option>
+  </select>
+  <label>Cantidad</label><input type="number" id="ajusteCantidad" placeholder="0" min="0">
+  <label>Motivo del ajuste</label>
+  <select id="ajusteMotivo">
+    <option value="conteo">📋 Conteo físico</option><option value="error">✏️ Corrección de error</option>
+    <option value="dano">📦 Producto dañado</option><option value="robo">🔒 Pérdida / Robo</option>
+    <option value="otro">📝 Otro</option>
+  </select>
+  <label>Nota (opcional)</label><textarea id="ajusteNota" placeholder="Describe el motivo..."></textarea>
+  <button id="btnConfirmarAjuste">✅ Confirmar Ajuste</button>
+</div>
+</div>
+
+<div id="modalEditarMov" class="modal oculto">
+<div class="modal-contenido">
+  <div class="modal-header"><h2>✏️ Editar Movimiento <span class="chip-pro">PRO</span></h2><button class="btn-cerrar" onclick="cerrarEditarMov()">✕</button></div>
+  <div class="info-producto">
+    <div class="info-prod-row"><span>Producto:</span><strong id="editMovNombre">—</strong></div>
+    <div class="info-prod-row"><span>Tipo:</span><strong id="editMovTipo">—</strong></div>
+  </div>
+  <label>Cantidad</label><input type="number" id="editMovCantidad" placeholder="0" min="1">
+  <label>Precio unitario (CUP)</label><input type="number" id="editMovPrecio" placeholder="0.00" min="0">
+  <label>Proveedor / Cliente</label><input type="text" id="editMovContacto" placeholder="Nombre">
+  <label>Nota</label><textarea id="editMovNota" placeholder="Observaciones..."></textarea>
+  <button id="btnConfirmarEditMov">💾 Guardar Cambios</button>
+</div>
+</div>
+
+<div id="modalEscaner" class="modal oculto">
+<div class="modal-contenido" style="height:420px;">
+  <div class="modal-header"><h2>📷 Escanear código</h2><button class="btn-cerrar" onclick="cerrarEscaner()">✕</button></div>
+  <div id="visorEscaner" style="width:100%;height:300px;"></div>
+  <p style="text-align:center;color:var(--text2);font-size:13px;margin-top:12px;">Apunta la cámara al código de barras</p>
+</div>
+</div>
+
+<div id="modalPin" class="modal oculto">
+<div class="modal-contenido" style="max-height:480px;">
+  <div class="modal-header"><h2>🔒 Acceso protegido</h2></div>
+  <p style="text-align:center;color:var(--text2);margin-bottom:20px;font-size:14px;">Ingresa tu PIN para continuar</p>
+  <div class="pin-display" id="pinDisplay">
+    <span class="pin-dot" id="pd1"></span><span class="pin-dot" id="pd2"></span>
+    <span class="pin-dot" id="pd3"></span><span class="pin-dot" id="pd4"></span>
+  </div>
+  <div class="pin-teclado">
+    <button onclick="pinTecla('1')">1</button><button onclick="pinTecla('2')">2</button><button onclick="pinTecla('3')">3</button>
+    <button onclick="pinTecla('4')">4</button><button onclick="pinTecla('5')">5</button><button onclick="pinTecla('6')">6</button>
+    <button onclick="pinTecla('7')">7</button><button onclick="pinTecla('8')">8</button><button onclick="pinTecla('9')">9</button>
+    <button class="pin-vacio"></button><button onclick="pinTecla('0')">0</button><button onclick="pinBorrar()">⌫</button>
+  </div>
+  <p id="pinError" style="text-align:center;color:var(--warn);font-size:13px;margin-top:12px;display:none;">PIN incorrecto. Intenta de nuevo.</p>
+</div>
+</div>
+
+<!-- BOTTOM SHEETS -->
+<div id="sheetProductos" class="sheet-overlay oculto" onclick="cerrarSheetSiOverlay(event)">
+  <div class="sheet-contenido">
+    <div class="sheet-handle"></div>
+    <div class="sheet-header"><h3>Seleccionar Producto</h3><button class="btn-cerrar" onclick="cerrarSheetProductos()">✕</button></div>
+    <div class="sheet-search"><input type="text" id="sheetBuscador" placeholder="🔍 Buscar por nombre o código..." oninput="filtrarSheet()" autocomplete="off"></div>
+    <div class="sheet-filtros" id="sheetFiltros"><button class="chip-filtro activo" data-filtro="" onclick="seleccionarFiltroSheet(this)">Todos</button></div>
+    <div class="sheet-lista" id="sheetLista"></div>
+    <div class="sheet-footer"><span id="sheetContador">0 productos</span></div>
+  </div>
+</div>
+
+<!-- SHEET: SELECCIÓN DE CLIENTE (para fiados) -->
+<div id="sheetClientes" class="sheet-overlay oculto" onclick="cerrarSheetClientesSiOverlay(event)">
+  <div class="sheet-contenido">
+    <div class="sheet-handle"></div>
+    <div class="sheet-header">
+      <h3>Seleccionar Cliente</h3>
+      <button onclick="cerrarSheetClientes()">✕</button>
+    </div>
+    <div class="sheet-buscador-wrap">
+      <input type="text" id="sheetBuscadorClientes" class="sheet-buscador" placeholder="🔍 Buscar cliente..." oninput="renderSheetListaClientes()">
+    </div>
+    <div id="sheetListaClientes" class="sheet-lista"></div>
+    <div class="sheet-footer">
+      <button onclick="abrirModalCliente()" style="background:none;border:none;color:var(--accent);font-size:13px;cursor:pointer;">＋ Nuevo cliente</button>
+    </div>
+  </div>
+</div>
+
+<div id="sheetAcciones" class="sheet-overlay oculto" onclick="cerrarSheetAccionesSiOverlay(event)">
+  <div class="sheet-contenido sheet-acciones-contenido">
+    <div class="sheet-handle"></div>
+    <div class="sa-header">
+      <div class="sa-icono" id="saIcono">📦</div>
+      <div class="sa-info"><h3 id="saNombre">—</h3><div class="sa-meta"><span id="saStock">—</span><span class="sa-sep">·</span><span id="saUbicacion">—</span></div></div>
+      <button class="btn-cerrar" onclick="cerrarSheetAcciones()">✕</button>
+    </div>
+    <div class="sa-precios">
+      <div class="sa-precio-item"><span>Compra</span><strong id="saCompra">—</strong></div>
+      <div class="sa-precio-sep"></div>
+      <div class="sa-precio-item"><span>Venta</span><strong id="saVenta">—</strong></div>
+      <div class="sa-precio-sep"></div>
+      <div class="sa-precio-item"><span>Margen</span><strong id="saMargen" class="accent">—</strong></div>
+    </div>
+    <div id="saLotesDetalle" class="sa-lotes-detalle oculto"></div>
+    <div class="sa-grid">
+      <button class="sa-btn sa-btn-green" onclick="accionRapida('entrada')"><span class="sa-btn-icon">📥</span><span>Entrada</span></button>
+      <button class="sa-btn sa-btn-red" onclick="accionRapida('salida')"><span class="sa-btn-icon">📤</span><span>Salida</span></button>
+      <button class="sa-btn sa-btn-blue" onclick="accionRapida('editar')"><span class="sa-btn-icon">✏️</span><span>Editar</span></button>
+      <button class="sa-btn sa-btn-gold" onclick="accionRapida('ajuste')"><span class="sa-btn-icon">🔢</span><span>Ajuste</span></button>
+      <button class="sa-btn sa-btn-teal" onclick="accionRapida('duplicar')"><span class="sa-btn-icon">📋</span><span>Duplicar</span></button>
+      <button class="sa-btn sa-btn-purple" onclick="accionRapida('historial')"><span class="sa-btn-icon">📊</span><span>Historial</span></button>
+    </div>
+    <button class="sa-btn-eliminar" onclick="accionRapida('eliminar')">🗑️ Eliminar producto</button>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
