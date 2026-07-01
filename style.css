@@ -1193,3 +1193,133 @@ textarea { height: 80px; resize: none; }
 .alerta-info strong { font-size: 14px; color: var(--text); display: block; }
 .alerta-info span   { font-size: 12px; color: var(--text2); }
 .alerta-arrow { color: var(--text3); font-size: 18px; }
+
+/* ══════════════════════════════════════════════════
+   MÓDULO ONAT — CENTRO FISCAL TCP
+   ══════════════════════════════════════════════════ */
+
+/* Estado de salud fiscal */
+.onat-salud {
+  padding: 12px 16px;
+  border-radius: 14px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.onat-salud.verde  { background: rgba(0,232,150,0.1);  border: 1px solid rgba(0,232,150,0.3);  color: var(--accent); }
+.onat-salud.amarillo { background: rgba(245,197,66,0.1); border: 1px solid rgba(245,197,66,0.3); color: var(--gold); }
+.onat-salud.rojo   { background: rgba(255,107,74,0.1);  border: 1px solid rgba(255,107,74,0.3);  color: var(--warn); }
+
+/* Verificación automática */
+.onat-verif { display: flex; flex-direction: column; gap: 6px; }
+.onat-verif-item {
+  font-size: 13px;
+  color: var(--text2);
+  padding: 6px 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.onat-verif-item.ok { color: var(--accent); border-color: rgba(0,232,150,0.2); }
+
+/* Tarjeta de tributo */
+.onat-tributo-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  margin-bottom: 10px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: 0.15s;
+}
+.onat-tributo-card:active { transform: scale(0.98); }
+.onat-tributo-card.onat-inactivo { opacity: 0.45; cursor: default; }
+.onat-tributo-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 14px 16px 10px;
+}
+.onat-tributo-codigo {
+  font-family: 'Syne', Arial, sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text2);
+  letter-spacing: 0.5px;
+}
+.onat-tributo-nombre {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  margin-top: 2px;
+  max-width: 180px;
+}
+.onat-tributo-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 16px 12px;
+  border-top: 1px solid var(--border);
+  gap: 8px;
+}
+
+/* Botones pequeños dentro de tarjetas */
+.onat-btn-small {
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+  transition: 0.15s;
+}
+.onat-btn-small.accent {
+  background: rgba(0,232,150,0.12);
+  border-color: rgba(0,232,150,0.3);
+  color: var(--accent);
+}
+.onat-btn-small:active { transform: scale(0.96); }
+
+/* Calendario fiscal */
+.onat-cal-mes {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+.onat-cal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.onat-cal-nombre {
+  font-family: 'Syne', Arial, sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+.onat-cal-total {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--warn);
+  font-family: 'Syne', Arial, sans-serif;
+}
+.onat-cal-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 16px;
+  font-size: 13px;
+  color: var(--text2);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: 0.12s;
+}
+.onat-cal-item:last-child { border-bottom: none; }
+.onat-cal-item:active { background: var(--surface2); }
+.onat-cal-item.pagado { color: var(--accent); }
+.onat-cal-item.vencido { color: var(--warn); }

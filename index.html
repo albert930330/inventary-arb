@@ -78,9 +78,9 @@
       <div class="menu-icon icon-purple">📊</div>
       <div class="menu-text"><h4>Reportes</h4><p id="menuResumenReportes">Ver análisis</p></div>
     </div>
-    <div class="menu-btn" onclick="proximamente('ONAT')">
+    <div class="menu-btn" onclick="abrirONAT()">
       <div class="menu-icon icon-orange">🏛️</div>
-      <div class="menu-text"><h4>ONAT <span class="chip-nuevo">TCP</span></h4><p>Módulo fiscal</p></div>
+      <div class="menu-text"><h4>ONAT <span class="chip-nuevo">TCP</span></h4><p id="menuResumenONAT">Centro fiscal</p></div>
     </div>
   </div>
   <div id="alertasInteligentes" style="display:none; padding:0 20px 4px;"></div>
@@ -561,8 +561,179 @@
 </div>
 
 <!-- ═══════════════════════════════════════════════ -->
-<!-- PANTALLA: REPORTES                              -->
+<!-- PANTALLA: ONAT — PANEL PRINCIPAL               -->
 <!-- ═══════════════════════════════════════════════ -->
+<div id="pantallaONAT" class="pantalla">
+  <div class="header">
+    <button class="btn-back" onclick="volverInicio()">‹</button>
+    <div class="header-left"><h1>🏛️ ONAT</h1><p id="onatEstadoHeader">Centro Fiscal TCP</p></div>
+    <button class="btn-tool" onclick="abrirONATTab('expediente')">📋</button>
+  </div>
+
+  <!-- Tabs principales -->
+  <div class="alm-tabs" style="margin-top:0;">
+    <button class="alm-tab activo" id="onatTabPanel" onclick="abrirONATTab('panel')">Panel</button>
+    <button class="alm-tab" id="onatTabTributos" onclick="abrirONATTab('tributos')">Tributos</button>
+    <button class="alm-tab" id="onatTabCalendario" onclick="abrirONATTab('calendario')">Calendario</button>
+    <button class="alm-tab" id="onatTabExpediente" onclick="abrirONATTab('expediente')">Expediente</button>
+  </div>
+
+  <!-- TAB: PANEL PRINCIPAL -->
+  <div id="onatContenidoPanel" class="alm-tab-contenido">
+    <!-- Estado de salud fiscal -->
+    <div id="onatSaludFiscal" style="margin:14px 20px 8px;"></div>
+
+    <!-- Verificación automática -->
+    <div id="onatVerificacion" style="padding:0 20px 8px;"></div>
+
+    <!-- Resumen ejecutivo del mes -->
+    <div class="cfg-grupo-label">RESUMEN DEL MES</div>
+    <div class="dashfin-cascada" style="margin:0 20px 14px;">
+      <div class="dashfin-row"><span>Ventas del mes</span><strong id="onatVentasMes">0 CUP</strong></div>
+      <div class="dashfin-row dashfin-resta"><span>− Gastos deducibles</span><strong id="onatGastosDeducibles">0 CUP</strong></div>
+      <div class="dashfin-sep"></div>
+      <div class="dashfin-row dashfin-subtotal"><span>= Utilidad estimada</span><strong id="onatUtilidadMes">0 CUP</strong></div>
+      <div class="dashfin-row dashfin-resta"><span>− Tributos estimados</span><strong id="onatTributosMes">0 CUP</strong></div>
+      <div class="dashfin-sep"></div>
+      <div class="dashfin-row dashfin-total"><span>= Resultado neto</span><strong id="onatResultadoNeto">0 CUP</strong></div>
+    </div>
+
+    <!-- Próximos vencimientos -->
+    <div class="cfg-grupo-label">PRÓXIMOS VENCIMIENTOS</div>
+    <div id="onatProximosVencimientos" class="cfg-grupo" style="margin:0 20px 14px;"></div>
+
+    <!-- Botones de acción -->
+    <div style="padding:0 20px 14px; display:flex; gap:10px;">
+      <button class="cli-btn-abono" onclick="abrirSimulador()">🧮 Simulador</button>
+      <button class="cli-btn-abono" onclick="exportarReporteONAT()">📄 Exportar PDF</button>
+    </div>
+    <div style="height:30px;"></div>
+  </div>
+
+  <!-- TAB: TRIBUTOS -->
+  <div id="onatContenidoTributos" class="alm-tab-contenido oculto">
+    <div style="padding:10px 20px 4px; display:flex; gap:8px; align-items:center;">
+      <select id="onatMesTributo" class="select-tool" onchange="renderTributos()">
+        <option value="0">Enero</option><option value="1">Febrero</option>
+        <option value="2">Marzo</option><option value="3">Abril</option>
+        <option value="4">Mayo</option><option value="5">Junio</option>
+        <option value="6">Julio</option><option value="7">Agosto</option>
+        <option value="8">Septiembre</option><option value="9">Octubre</option>
+        <option value="10">Noviembre</option><option value="11">Diciembre</option>
+      </select>
+      <select id="onatAnioTributo" class="select-tool" onchange="renderTributos()">
+        <option value="2026">2026</option><option value="2027">2027</option>
+      </select>
+    </div>
+    <!-- Origen de datos -->
+    <div style="padding:4px 20px 8px; display:flex; gap:10px; align-items:center;">
+      <label style="font-size:13px;color:var(--text2);">Origen:</label>
+      <select id="onatOrigenDatos" class="select-tool" style="flex:1;" onchange="renderTributos()">
+        <option value="automatico">🔄 Automático (datos de la app)</option>
+        <option value="manual">✏️ Ajuste manual</option>
+      </select>
+    </div>
+    <div id="onatAjusteManualBloque" class="oculto" style="padding:0 20px 8px;">
+      <input type="number" id="onatIngresosManual" placeholder="Ingresos a declarar (CUP)" class="rep-date-input" style="width:100%;margin-bottom:6px;" oninput="renderTributos()">
+      <input type="text" id="onatObservacionManual" placeholder="Observación (opcional)" class="rep-date-input" style="width:100%;">
+    </div>
+    <div id="listaTributos" style="padding:0 20px 100px;"></div>
+  </div>
+
+  <!-- TAB: CALENDARIO -->
+  <div id="onatContenidoCalendario" class="alm-tab-contenido oculto">
+    <div id="calendarioFiscal" style="padding:10px 20px 100px;"></div>
+  </div>
+
+  <!-- TAB: EXPEDIENTE -->
+  <div id="onatContenidoExpediente" class="alm-tab-contenido oculto">
+    <div class="cfg-grupo-label" style="padding-top:14px;">DATOS FISCALES</div>
+    <div class="cfg-grupo">
+      <div class="cfg-input-row"><span class="cfg-input-label">NIT</span><input type="text" id="expedNIT" class="cfg-input-inline" placeholder="Número de Identificación"></div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-input-row"><span class="cfg-input-label">Nombre completo</span><input type="text" id="expedNombre" class="cfg-input-inline" placeholder="Nombre y apellidos"></div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-input-row"><span class="cfg-input-label">Municipio</span><input type="text" id="expedMunicipio" class="cfg-input-inline" placeholder="Municipio"></div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-input-row"><span class="cfg-input-label">Actividad principal</span><input type="text" id="expedActividad" class="cfg-input-inline" placeholder="Actividad económica"></div>
+    </div>
+
+    <div class="cfg-grupo-label">DATOS BANCARIOS</div>
+    <div class="cfg-grupo">
+      <div class="cfg-input-row"><span class="cfg-input-label">Banco</span><input type="text" id="expedBanco" class="cfg-input-inline" placeholder="BANDEC / BPA"></div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-input-row"><span class="cfg-input-label">Sucursal</span><input type="text" id="expedSucursal" class="cfg-input-inline" placeholder="Número de sucursal"></div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-input-row"><span class="cfg-input-label">Cuenta fiscal</span><input type="text" id="expedCuenta" class="cfg-input-inline" placeholder="Número de cuenta"></div>
+    </div>
+
+    <div class="cfg-grupo-label">CONTACTO ONAT</div>
+    <div class="cfg-grupo">
+      <div class="cfg-input-row"><span class="cfg-input-label">Inspector</span><input type="text" id="expedInspector" class="cfg-input-inline" placeholder="Nombre del inspector"></div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-input-row"><span class="cfg-input-label">Teléfono ONAT</span><input type="tel" id="expedTelONAT" class="cfg-input-inline" placeholder="Teléfono"></div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-input-row"><span class="cfg-input-label">Correo ONAT</span><input type="email" id="expedCorreo" class="cfg-input-inline" placeholder="Correo electrónico"></div>
+    </div>
+
+    <div class="cfg-grupo-label">CONFIGURACIÓN FISCAL</div>
+    <div class="cfg-grupo">
+      <div class="cfg-input-row"><span class="cfg-input-label">Tasa 0114022 (%)</span><input type="number" id="cfgTasa0114022" class="cfg-input-inline" placeholder="10" step="0.1"></div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-input-row"><span class="cfg-input-label">Tasa 0510122 (%)</span><input type="number" id="cfgTasa0510122" class="cfg-input-inline" placeholder="5" step="0.1"></div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-input-row"><span class="cfg-input-label">Mín. exento mensual</span><input type="number" id="cfgMinExentoMensual" class="cfg-input-inline" placeholder="3260"></div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-input-row"><span class="cfg-input-label">Mín. exento anual</span><input type="number" id="cfgMinExentoAnual" class="cfg-input-inline" placeholder="39120"></div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-input-row"><span class="cfg-input-label">Salario empleados</span><input type="number" id="cfgSalarioEmpleados" class="cfg-input-inline" placeholder="Total mensual"></div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-input-row"><span class="cfg-input-label">Base contrib. titular</span><input type="number" id="cfgBaseContrib" class="cfg-input-inline" placeholder="800 / 1200"></div>
+    </div>
+    <div style="padding:14px 20px;">
+      <button onclick="guardarExpediente()" style="width:100%;padding:15px;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#0a0f0d;border:none;border-radius:14px;font-size:16px;font-weight:700;font-family:'Syne',Arial,sans-serif;cursor:pointer;">💾 Guardar Expediente</button>
+    </div>
+    <div style="height:40px;"></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!-- PANTALLA: DETALLE DE TRIBUTO                    -->
+<!-- ═══════════════════════════════════════════════ -->
+<div id="pantallaTributoDetalle" class="pantalla">
+  <div class="header">
+    <button class="btn-back" onclick="volverONAT()">‹</button>
+    <div class="header-left">
+      <h1 id="tribDetCodigo">—</h1>
+      <p id="tribDetNombre">—</p>
+    </div>
+  </div>
+  <div id="tribDetContenido" style="padding:0 20px 100px;"></div>
+</div>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!-- PANTALLA: SIMULADOR FISCAL                      -->
+<!-- ═══════════════════════════════════════════════ -->
+<div id="pantallaSimulador" class="pantalla">
+  <div class="header">
+    <button class="btn-back" onclick="volverONAT()">‹</button>
+    <div class="header-left"><h1>🧮 Simulador</h1><p>Proyección fiscal</p></div>
+  </div>
+  <div style="padding:16px 20px 8px;">
+    <label style="font-size:12px;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;">¿Y si este mes vendo...?</label>
+    <input type="number" id="simVentas" placeholder="0" oninput="calcularSimulacion()" style="width:100%;padding:16px;font-size:20px;font-family:'Syne',Arial,sans-serif;font-weight:700;border:1.5px solid var(--accent);border-radius:14px;background:var(--surface);color:var(--accent);margin-top:8px;box-sizing:border-box;">
+  </div>
+  <div style="padding:0 20px 4px;">
+    <label style="font-size:12px;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;">Con gastos deducibles de...</label>
+    <input type="number" id="simGastos" placeholder="0" oninput="calcularSimulacion()" style="width:100%;padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--surface);color:var(--text);margin-top:6px;box-sizing:border-box;">
+  </div>
+  <div class="cfg-grupo-label">RESULTADO ESTIMADO</div>
+  <div id="simResultado" class="dashfin-cascada" style="margin:0 20px 14px;"></div>
+  <div class="cfg-grupo-label">DESGLOSE POR TRIBUTO</div>
+  <div id="simDetalle" class="cfg-grupo" style="margin:0 20px 100px;"></div>
+</div>
+
+<!-- PANTALLA: REPORTES                              -->
 <div id="pantallaReportes" class="pantalla">
   <div class="header">
     <button class="btn-back" onclick="volverInicio()">‹</button>

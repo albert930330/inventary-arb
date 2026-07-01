@@ -253,6 +253,7 @@ let clienteActualId = null;
 let editandoClienteId = null;
 let tabClienteActual = "fiados";
 let vistaReporteActual = "dia";
+let onatTabActual = "panel";
 
 const CATEGORIAS_GASTO = {
     combustible: { nombre: "Combustible", icono: "⛽" },
@@ -385,6 +386,42 @@ function abrirReportes() {
     document.getElementById("btnFlotante").classList.add("ocultar-boton");
     vistaReporteActual = "dia";
     actualizarReporte();
+}
+
+function abrirONAT() {
+    mostrarPantalla("pantallaONAT");
+    document.getElementById("btnFlotante").classList.add("ocultar-boton");
+    onatTabActual = "panel";
+    // Set current month in selector
+    const ahora = new Date();
+    const selMes = document.getElementById("onatMesTributo");
+    const selAnio = document.getElementById("onatAnioTributo");
+    if (selMes) selMes.value = ahora.getMonth();
+    if (selAnio) selAnio.value = ahora.getFullYear();
+    renderONATPanel();
+}
+
+function volverONAT() {
+    mostrarPantalla("pantallaONAT", "atras");
+    document.getElementById("btnFlotante").classList.add("ocultar-boton");
+}
+
+function abrirONATTab(tab) {
+    onatTabActual = tab;
+    ["panel","tributos","calendario","expediente"].forEach(t => {
+        document.getElementById("onatTab" + t.charAt(0).toUpperCase() + t.slice(1)).classList.toggle("activo", t === tab);
+        document.getElementById("onatContenido" + t.charAt(0).toUpperCase() + t.slice(1)).classList.toggle("oculto", t !== tab);
+    });
+    if (tab === "panel") renderONATPanel();
+    else if (tab === "tributos") renderTributos();
+    else if (tab === "calendario") renderCalendarioFiscal();
+    else if (tab === "expediente") cargarExpediente();
+}
+
+function abrirSimulador() {
+    mostrarPantalla("pantallaSimulador");
+    document.getElementById("btnFlotante").classList.add("ocultar-boton");
+    calcularSimulacion();
 }
 
 function volverClientes() {
@@ -3283,4 +3320,603 @@ function exportarReportePDF() {
     doc.setFontSize(12);
     add("GANANCIA NETA:", document.getElementById("repGananciaNeta").innerText);
     doc.save(`reporte-${etiqueta.replace(/[^a-zA-Z0-9]/g,"-")}.pdf`);
+}
+
+// ═══════════════════════════════════════════════
+// MOTOR FISCAL — ONAT TCP
+// ═══════════════════════════════════════════════
+
+// Tabla de configuración fiscal (editable por el usuario, no hardcoded en cálculos)
+function getCfgFiscal() {
+    const cfg = DB.configuracion.fiscal || {};
+    return {
+        tasa0114022: cfg.tasa0114022 ?? 10,        // % sobre ventas
+        tasa0510122: cfg.tasa0510122 ?? 5,          // % sobre ingresos - mín.exento
+        minExentoMensual: cfg.minExentoMensual ?? 3260,
+        minExentoAnual: cfg.minExentoAnual ?? 39120,
+        salarioEmpleados: cfg.salarioEmpleados ?? 0, // total mensual nómina
+        baseContribTitular: cfg.baseContribTitular ?? 800, // base 0820132
+        tieneEmpleados: (cfg.salarioEmpleados || 0) > 0,
+        // Escala 0520522 (retención empleados)
+        escala0520522: [
+            { desde: 0, hasta: 3260, tasa: 0 },
+            { desde: 3260, hasta: 9510, tasa: 3 },
+            { desde: 9510, hasta: 15000, tasa: 5 },
+            { desde: 15000, hasta: 20000, tasa: 7.5 },
+            { desde: 20000, hasta: 25000, tasa: 10 },
+            { desde: 25000, hasta: 30000, tasa: 15 },
+            { desde: 30000, hasta: Infinity, tasa: 20 }
+        ],
+        // Escala 0820232 (contribución especial SS empleados)
+        escala0820232: [
+            { desde: 0, hasta: 15000, tasa: 5 },
+            { desde: 15000, hasta: Infinity, tasa: 10 }
+        ]
+    };
+}
+
+// Calcula impuesto según escala progresiva
+function calcularEscala(ingreso, escala) {
+    let total = 0;
+    for (const tramo of escala) {
+        if (ingreso <= tramo.desde) break;
+        const base = Math.min(ingreso, tramo.hasta) - tramo.desde;
+        total += base * (tramo.tasa / 100);
+    }
+    return total;
+}
+
+// MOTOR PRINCIPAL: calcula todos los tributos para un mes/año dados con ingresos específicos
+function calcularTributos(ingresosMes, gastosMes, mes, anio) {
+    const cfg = getCfgFiscal();
+    const moneda = DB.configuracion.moneda || "CUP";
+    const resultados = {};
+
+    // 0114022 — Impuesto sobre Ventas (mensual, día 20)
+    const imp0114022 = ingresosMes * (cfg.tasa0114022 / 100);
+    resultados["0114022"] = {
+        codigo: "0114022", nombre: "Impuesto sobre Ventas",
+        importe: imp0114022, frecuencia: "mensual", diaLimite: 20,
+        pasos: [
+            { label: "Ventas del mes", valor: ingresosMes },
+            { label: `× ${cfg.tasa0114022}%`, valor: null },
+            { label: "Impuesto a pagar", valor: imp0114022, destacado: true }
+        ],
+        baseLegal: "Tributo 0114022: 10% de los ingresos totales por ventas/servicios del mes.",
+        esAplicable: true
+    };
+
+    // 0510122 — Ingresos Personales aporte mensual (día 20)
+    const baseImp0510122 = Math.max(0, ingresosMes - cfg.minExentoMensual);
+    const imp0510122 = baseImp0510122 * (cfg.tasa0510122 / 100);
+    resultados["0510122"] = {
+        codigo: "0510122", nombre: "Ingresos Personales — Aporte mensual",
+        importe: imp0510122, frecuencia: "mensual", diaLimite: 20,
+        pasos: [
+            { label: "Ingresos del mes", valor: ingresosMes },
+            { label: `− Mínimo exento`, valor: cfg.minExentoMensual },
+            { label: "= Base imponible", valor: baseImp0510122 },
+            { label: `× ${cfg.tasa0510122}%`, valor: null },
+            { label: "Impuesto a pagar", valor: imp0510122, destacado: true }
+        ],
+        baseLegal: `Tributo 0510122: 5% de los ingresos del mes después de descontar ${cfg.minExentoMensual.toLocaleString("es-CU")} CUP de mínimo exento mensual.`,
+        esAplicable: true
+    };
+
+    // 0520522 — Retención a empleados (mensual, primeros 10 días hábiles)
+    const sal = cfg.salarioEmpleados;
+    const imp0520522 = cfg.tieneEmpleados ? calcularEscala(sal, cfg.escala0520522) : 0;
+    resultados["0520522"] = {
+        codigo: "0520522", nombre: "Retención Empleados — Ingresos Personales",
+        importe: imp0520522, frecuencia: "mensual", diaLimite: 10,
+        pasos: [
+            { label: "Salario total empleados", valor: sal },
+            { label: "Escala progresiva aplicada", valor: null },
+            { label: "Retención total", valor: imp0520522, destacado: true }
+        ],
+        baseLegal: "Tributo 0520522: Retención mensual del impuesto sobre ingresos personales de empleados según escala progresiva (0% hasta 3,260 CUP; 3% de 3,260 a 9,510; 5% de 9,510 a 15,000; etc.).",
+        esAplicable: cfg.tieneEmpleados,
+        escala: cfg.escala0520522, ingresoBase: sal
+    };
+
+    // 0810132 — Contribución Seguridad Social empleados (mensual, primeros 10 días)
+    const imp0810132 = cfg.tieneEmpleados ? sal * 0.125 : 0; // 12.5% al Estado
+    resultados["0810132"] = {
+        codigo: "0810132", nombre: "Contribución Seguridad Social — Empleados",
+        importe: imp0810132, frecuencia: "mensual", diaLimite: 10,
+        pasos: [
+            { label: "Salario total empleados", valor: sal },
+            { label: "× 12.5% (14% − 1.5% subsidio)", valor: null },
+            { label: "Aporte al Estado", valor: imp0810132, destacado: true }
+        ],
+        baseLegal: "Tributo 0810132: El titular asume 14% de SS de sus empleados, retiene 1.5% para subsidios y aporta el 12.5% restante al Estado en los primeros 10 días hábiles del mes.",
+        esAplicable: cfg.tieneEmpleados
+    };
+
+    // 0820232 — Contribución Especial SS empleados (mensual, primeros 10 días)
+    const imp0820232 = cfg.tieneEmpleados ? calcularEscala(sal, cfg.escala0820232) : 0;
+    resultados["0820232"] = {
+        codigo: "0820232", nombre: "Contribución Especial SS — Retención Empleados",
+        importe: imp0820232, frecuencia: "mensual", diaLimite: 10,
+        pasos: [
+            { label: "Salario total empleados", valor: sal },
+            { label: "Hasta 15,000: 5% / Exceso: 10%", valor: null },
+            { label: "Retención total", valor: imp0820232, destacado: true }
+        ],
+        baseLegal: "Tributo 0820232: Retención mensual de la Contribución Especial a la Seguridad Social de empleados. Hasta 15,000 CUP: 5%; exceso: 10%. Se retiene del salario del empleado.",
+        esAplicable: cfg.tieneEmpleados
+    };
+
+    // 0610322 — Fuerza de Trabajo (trimestral, día 20 mes siguiente)
+    const esTrimestre = [2,5,8,11].includes(mes); // mar, jun, sep, dic
+    const salTrimestreEst = sal * 3;
+    const imp0610322 = cfg.tieneEmpleados ? salTrimestreEst * 0.05 : 0;
+    resultados["0610322"] = {
+        codigo: "0610322", nombre: "Fuerza de Trabajo — Trimestral",
+        importe: esTrimestre && cfg.tieneEmpleados ? imp0610322 : 0,
+        frecuencia: "trimestral", diaLimite: 20,
+        pasos: [
+            { label: "Salario trimestral estimado", valor: salTrimestreEst },
+            { label: "× 5%", valor: null },
+            { label: "Impuesto trimestral", valor: imp0610322, destacado: true }
+        ],
+        baseLegal: "Tributo 0610322: 5% del total de remuneraciones pagadas a empleados en el trimestre. Se paga el día 20 del mes siguiente al cierre del trimestre.",
+        esAplicable: cfg.tieneEmpleados, esTrimestre
+    };
+
+    // 0820132 — Contribución Especial SS titular (trimestral)
+    // Primer trimestre = 800, resto = 1,200
+    const trimestre = Math.floor(mes / 3); // 0,1,2,3
+    const imp0820132 = trimestre === 0 ? 800 : 1200;
+    resultados["0820132"] = {
+        codigo: "0820132", nombre: "Contribución Especial SS — Titular",
+        importe: esTrimestre ? imp0820132 : 0,
+        frecuencia: "trimestral", diaLimite: 20,
+        pasos: [
+            { label: "Base de contribución seleccionada", valor: cfg.baseContribTitular },
+            { label: "× 20% trimestral", valor: null },
+            { label: trimestre === 0 ? "Primer trimestre (ajustado)" : "Trimestre regular", valor: imp0820132, destacado: true }
+        ],
+        baseLegal: "Tributo 0820132: 20% de la base de contribución seleccionada en la afiliación al INASS, pagado trimestralmente.",
+        esAplicable: true, esTrimestre
+    };
+
+    // 0730122 — Impuesto sobre Documentos (enero solamente, 30 CUP fijo)
+    resultados["0730122"] = {
+        codigo: "0730122", nombre: "Impuesto sobre Documentos",
+        importe: mes === 0 ? 30 : 0, frecuencia: "anual", diaLimite: 20,
+        pasos: [
+            { label: "Importe fijo anual", valor: 30, destacado: true }
+        ],
+        baseLegal: "Tributo 0730122: 30 CUP fijos, pagaderos en enero de cada año.",
+        esAplicable: mes === 0
+    };
+
+    // 0530222 — Declaración Jurada anual (30 abril año siguiente)
+    // Calculamos el estimado acumulado del año
+    const iniAnio = new Date(anio, 0, 1);
+    const finAnio = new Date(anio, mes + 1, 0, 23, 59, 59);
+    const ingresosAnio = DB.movimientos
+        .filter(m => m.tipo === "salida" && new Date(m.fecha) >= iniAnio && new Date(m.fecha) <= finAnio)
+        .reduce((s, m) => s + (m.precioUnitario || 0) * (m.cantidad || 0), 0);
+    const gastosAnio = DB.gastosEnRango(iniAnio, finAnio).reduce((s, g) => s + g.monto, 0);
+    const baseAnual = Math.max(0, ingresosAnio - cfg.minExentoAnual - gastosAnio);
+    // Escala progresiva simplificada del impuesto anual (legislación cubana TCP)
+    const escalaAnual = [
+        { desde: 0, hasta: 10000, tasa: 0 },
+        { desde: 10000, hasta: 20000, tasa: 15 },
+        { desde: 20000, hasta: 30000, tasa: 20 },
+        { desde: 30000, hasta: 50000, tasa: 30 },
+        { desde: 50000, hasta: Infinity, tasa: 35 }
+    ];
+    const impAnual = calcularEscala(baseAnual, escalaAnual);
+    const pagadosEnMeses = (resultados["0510122"].importe) * (mes + 1); // estimado
+    const saldoAnual = Math.max(0, impAnual - pagadosEnMeses);
+    resultados["0530222"] = {
+        codigo: "0530222", nombre: "Declaración Jurada — Ingresos Personales",
+        importe: saldoAnual, frecuencia: "anual", diaLimite: 30,
+        mesVencimiento: 3, // abril
+        pasos: [
+            { label: `Ingresos acumulados (${anio})`, valor: ingresosAnio },
+            { label: "− Mínimo exento anual", valor: cfg.minExentoAnual },
+            { label: "− Gastos deducibles", valor: gastosAnio },
+            { label: "= Base imponible", valor: baseAnual },
+            { label: "× Escala progresiva", valor: null },
+            { label: "Impuesto calculado", valor: impAnual },
+            { label: "− Ya pagado en 0510122 (estimado)", valor: pagadosEnMeses },
+            { label: "Saldo estimado a pagar", valor: saldoAnual, destacado: true }
+        ],
+        baseLegal: "Tributo 0530222: Declaración jurada anual. Descuenta mínimo exento 39,120 CUP y 100% de gastos documentados. Bonificación 5% si paga antes del 28 de febrero. Vence el 30 de abril del año siguiente.",
+        esAplicable: true
+    };
+
+    return resultados;
+}
+
+// Obtiene ingresos del mes actual de la app
+function ingresosDelMes(mes, anio) {
+    const inicio = new Date(anio, mes, 1);
+    const fin = new Date(anio, mes + 1, 0, 23, 59, 59);
+    return DB.movimientos
+        .filter(m => m.tipo === "salida" && new Date(m.fecha) >= inicio && new Date(m.fecha) <= fin)
+        .reduce((s, m) => s + (m.precioUnitario || 0) * (m.cantidad || 0), 0);
+}
+
+function gastosDelMes(mes, anio) {
+    const inicio = new Date(anio, mes, 1);
+    const fin = new Date(anio, mes + 1, 0, 23, 59, 59);
+    return DB.gastosEnRango(inicio, fin).reduce((s, g) => s + g.monto, 0);
+}
+
+// ── Panel principal ──
+function renderONATPanel() {
+    const ahora = new Date();
+    const mes = ahora.getMonth();
+    const anio = ahora.getFullYear();
+    const moneda = DB.configuracion.moneda || "CUP";
+    const ingresos = ingresosDelMes(mes, anio);
+    const gastos = gastosDelMes(mes, anio);
+    const tributos = calcularTributos(ingresos, gastos, mes, anio);
+
+    const totalTributos = Object.values(tributos).filter(t => t.esAplicable).reduce((s, t) => s + t.importe, 0);
+    const utilidad = ingresos - gastos;
+    const resultado = utilidad - totalTributos;
+
+    document.getElementById("onatVentasMes").innerText = ingresos.toLocaleString("es-CU") + " " + moneda;
+    document.getElementById("onatGastosDeducibles").innerText = gastos.toLocaleString("es-CU") + " " + moneda;
+    document.getElementById("onatUtilidadMes").innerText = utilidad.toLocaleString("es-CU") + " " + moneda;
+    document.getElementById("onatTributosMes").innerText = totalTributos.toLocaleString("es-CU") + " " + moneda;
+    document.getElementById("onatResultadoNeto").innerText = resultado.toLocaleString("es-CU") + " " + moneda;
+
+    // Estado de salud fiscal
+    const pagos = DB.configuracion.onatPagos || {};
+    const claveMes = `${anio}-${mes}`;
+    const pendientes = Object.values(tributos).filter(t => t.esAplicable && t.importe > 0 && !pagos[`${claveMes}-${t.codigo}`]);
+    const vencidos = pendientes.filter(t => {
+        const limite = new Date(anio, mes, t.diaLimite, 23, 59, 59);
+        return ahora > limite;
+    });
+
+    const saludEl = document.getElementById("onatSaludFiscal");
+    if (vencidos.length > 0) {
+        saludEl.innerHTML = `<div class="onat-salud rojo">🔴 ${vencidos.length} tributo${vencidos.length>1?'s':''} vencido${vencidos.length>1?'s':''} — Atiéndelo urgente</div>`;
+    } else if (pendientes.length > 0) {
+        saludEl.innerHTML = `<div class="onat-salud amarillo">🟡 ${pendientes.length} tributo${pendientes.length>1?'s':''} pendiente${pendientes.length>1?'s':''} este mes</div>`;
+    } else {
+        saludEl.innerHTML = `<div class="onat-salud verde">🟢 Estado fiscal al día — Sin pendientes</div>`;
+    }
+
+    // Verificación automática
+    const alertasVerif = [];
+    const sinMetodoPago = DB.movimientos.filter(m => m.tipo === "salida" && !m.metodoPago);
+    if (sinMetodoPago.length > 0) alertasVerif.push(`⚠️ ${sinMetodoPago.length} movimiento${sinMetodoPago.length>1?'s':''} sin método de pago`);
+    const sinCosto = DB.productos.filter(p => !p.compra || p.compra === 0);
+    if (sinCosto.length > 0) alertasVerif.push(`⚠️ ${sinCosto.length} producto${sinCosto.length>1?'s':''} sin costo registrado`);
+    const clientesDeuda = DB.clientes.filter(c => DB.nivelRiesgo(c.id) === "rojo");
+    if (clientesDeuda.length > 0) alertasVerif.push(`⚠️ ${clientesDeuda.length} cliente${clientesDeuda.length>1?'s':''} con deuda vencida`);
+
+    const verifEl = document.getElementById("onatVerificacion");
+    if (alertasVerif.length > 0) {
+        verifEl.innerHTML = `<div class="onat-verif">${alertasVerif.map(a=>`<div class="onat-verif-item">${a}</div>`).join("")}</div>`;
+    } else {
+        verifEl.innerHTML = `<div class="onat-verif"><div class="onat-verif-item ok">✅ Datos verificados — Sin inconsistencias detectadas</div></div>`;
+    }
+
+    // Próximos vencimientos
+    const proxEl = document.getElementById("onatProximosVencimientos");
+    const vencimientos = Object.values(tributos)
+        .filter(t => t.esAplicable && t.importe > 0)
+        .sort((a, b) => a.diaLimite - b.diaLimite)
+        .slice(0, 5);
+    proxEl.innerHTML = vencimientos.map((t, i) => {
+        const limite = new Date(anio, mes, t.diaLimite);
+        const diasRestantes = Math.ceil((limite - ahora) / (1000*60*60*24));
+        const estadoIcon = diasRestantes < 0 ? "🔴" : diasRestantes <= 3 ? "🟡" : "🟢";
+        const estadoTxt = diasRestantes < 0 ? `Vencido hace ${Math.abs(diasRestantes)} días` : diasRestantes === 0 ? "Vence hoy" : `${diasRestantes} días`;
+        return `<div class="cfg-row" style="cursor:pointer;" onclick="abrirDetalleTributo('${t.codigo}')">
+            <div class="cfg-row-body">
+                <span class="cfg-row-titulo">${estadoIcon} ${t.codigo} — ${t.nombre}</span>
+                <span class="cfg-row-sub">Vence día ${t.diaLimite} · ${estadoTxt}</span>
+            </div>
+            <strong style="font-family:'Syne',Arial,sans-serif;color:var(--warn);font-size:13px;">${t.importe.toLocaleString("es-CU")} ${moneda}</strong>
+        </div>${i < vencimientos.length-1 ? '<div class="cfg-row-sep"></div>' : ''}`;
+    }).join("");
+}
+
+// ── Centro de Tributos ──
+function renderTributos() {
+    const mes = parseInt(document.getElementById("onatMesTributo").value);
+    const anio = parseInt(document.getElementById("onatAnioTributo").value);
+    const origen = document.getElementById("onatOrigenDatos").value;
+    const moneda = DB.configuracion.moneda || "CUP";
+
+    document.getElementById("onatAjusteManualBloque").classList.toggle("oculto", origen !== "manual");
+
+    let ingresos, gastos;
+    if (origen === "manual") {
+        ingresos = Number(document.getElementById("onatIngresosManual").value) || 0;
+        gastos = gastosDelMes(mes, anio);
+    } else {
+        ingresos = ingresosDelMes(mes, anio);
+        gastos = gastosDelMes(mes, anio);
+    }
+
+    const tributos = calcularTributos(ingresos, gastos, mes, anio);
+    const pagos = DB.configuracion.onatPagos || {};
+    const claveMes = `${anio}-${mes}`;
+    const lista = document.getElementById("listaTributos");
+    const MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+
+    lista.innerHTML = Object.values(tributos).map(t => {
+        const clave = `${claveMes}-${t.codigo}`;
+        const pagado = pagos[clave];
+        const esActivo = t.esAplicable && t.importe > 0;
+        const colorEstado = pagado ? "var(--accent)" : esActivo ? "var(--warn)" : "var(--text3)";
+        const iconEstado = pagado ? "✅" : esActivo ? "⏳" : "—";
+
+        return `
+        <div class="onat-tributo-card ${!esActivo ? 'onat-inactivo' : ''}" onclick="${esActivo ? `abrirDetalleTributo('${t.codigo}')` : ''}">
+            <div class="onat-tributo-header">
+                <div>
+                    <div class="onat-tributo-codigo">${t.codigo}</div>
+                    <div class="onat-tributo-nombre">${t.nombre}</div>
+                </div>
+                <div style="text-align:right;">
+                    <div style="font-family:'Syne',Arial,sans-serif;font-size:17px;font-weight:700;color:${colorEstado};">
+                        ${esActivo ? t.importe.toLocaleString("es-CU") + " " + moneda : "No aplica"}
+                    </div>
+                    <div style="font-size:11px;color:var(--text2);">${iconEstado} ${pagado ? "Pagado el " + new Date(pagado.fecha).toLocaleDateString("es-CU") : esActivo ? "Pendiente" : t.frecuencia}</div>
+                </div>
+            </div>
+            ${esActivo ? `
+            <div class="onat-tributo-footer">
+                <span style="font-size:11px;color:var(--text2);">Vence día ${t.diaLimite} · ${MESES[mes]} ${anio}</span>
+                <div style="display:flex;gap:8px;">
+                    <button class="onat-btn-small" onclick="event.stopPropagation();abrirDetalleTributo('${t.codigo}')">Ver cálculo</button>
+                    ${!pagado ? `<button class="onat-btn-small accent" onclick="event.stopPropagation();marcarPagado('${t.codigo}','${claveMes}')">Marcar pagado</button>` : ''}
+                </div>
+            </div>` : ''}
+        </div>`;
+    }).join("");
+}
+
+// ── Detalle de tributo ──
+function abrirDetalleTributo(codigo) {
+    const mes = parseInt(document.getElementById("onatMesTributo")?.value ?? new Date().getMonth());
+    const anio = parseInt(document.getElementById("onatAnioTributo")?.value ?? new Date().getFullYear());
+    const origen = document.getElementById("onatOrigenDatos")?.value || "automatico";
+    const ingresos = origen === "manual" ? (Number(document.getElementById("onatIngresosManual")?.value) || 0) : ingresosDelMes(mes, anio);
+    const gastos = gastosDelMes(mes, anio);
+    const tributos = calcularTributos(ingresos, gastos, mes, anio);
+    const t = tributos[codigo]; if (!t) return;
+    const moneda = DB.configuracion.moneda || "CUP";
+    const MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+
+    mostrarPantalla("pantallaTributoDetalle");
+    document.getElementById("btnFlotante").classList.add("ocultar-boton");
+    document.getElementById("tribDetCodigo").innerText = t.codigo;
+    document.getElementById("tribDetNombre").innerText = t.nombre;
+
+    const pagos = DB.configuracion.onatPagos || {};
+    const clave = `${anio}-${mes}-${codigo}`;
+    const pagado = pagos[clave];
+
+    document.getElementById("tribDetContenido").innerHTML = `
+        <!-- Cálculo paso a paso -->
+        <div class="cfg-grupo-label" style="padding-top:14px;">¿CÓMO SE CALCULA?</div>
+        <div class="dashfin-cascada" style="margin:0 20px 14px;">
+            ${t.pasos.map(p => p.valor !== null ? `
+            <div class="dashfin-row ${p.destacado ? 'dashfin-total' : ''}">
+                <span>${p.label}</span>
+                <strong ${p.destacado ? `style="color:var(--accent);font-size:18px;"` : ''}>${p.valor.toLocaleString("es-CU")} ${p.valor !== null ? moneda : ''}</strong>
+            </div>` : `<div class="dashfin-sep" style="border-style:dashed;margin:4px 0;"></div>
+            <div style="font-size:12px;color:var(--text2);text-align:center;padding:4px 0;">${p.label}</div>
+            <div class="dashfin-sep" style="border-style:dashed;margin:4px 0;"></div>`).join("")}
+        </div>
+
+        <!-- Base legal -->
+        <div class="cfg-grupo-label">BASE LEGAL</div>
+        <div class="cfg-info-box" style="margin:0 20px 14px;">
+            <span>📖</span>
+            <p>${t.baseLegal}</p>
+        </div>
+
+        <!-- Fecha límite -->
+        <div class="cfg-grupo-label">FECHA LÍMITE</div>
+        <div class="cfg-grupo" style="margin:0 20px 14px;">
+            <div class="cfg-row" style="cursor:default;">
+                <div class="cfg-row-body">
+                    <span class="cfg-row-titulo">Vencimiento</span>
+                    <span class="cfg-row-sub">Día ${t.diaLimite} de ${MESES[mes]} ${anio}</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Estado de pago -->
+        <div class="cfg-grupo-label">ESTADO DE PAGO</div>
+        <div class="cfg-grupo" style="margin:0 20px 14px;">
+            ${pagado ? `
+            <div class="cfg-row" style="cursor:default;">
+                <div class="cfg-row-body">
+                    <span class="cfg-row-titulo" style="color:var(--accent);">✅ Pagado</span>
+                    <span class="cfg-row-sub">Fecha: ${new Date(pagado.fecha).toLocaleDateString("es-CU")} · Recibo: ${pagado.recibo || "—"} · ${pagado.canal || "—"}</span>
+                </div>
+            </div>` : `
+            <div class="cfg-row" style="cursor:default;">
+                <div class="cfg-row-body"><span class="cfg-row-titulo" style="color:var(--warn);">⏳ Pendiente de pago</span></div>
+            </div>`}
+        </div>
+
+        ${!pagado && t.esAplicable && t.importe > 0 ? `
+        <div style="padding:0 20px 14px;">
+            <label style="font-size:12px;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;">Registrar pago</label>
+            <input type="date" id="pagoFecha" value="${new Date().toISOString().slice(0,10)}" style="width:100%;padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--surface);color:var(--text);margin:8px 0;box-sizing:border-box;">
+            <input type="text" id="pagoRecibo" placeholder="Número de recibo (opcional)" style="width:100%;padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--surface);color:var(--text);margin-bottom:8px;box-sizing:border-box;">
+            <select id="pagoCanal" style="width:100%;padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--surface);color:var(--text);margin-bottom:12px;box-sizing:border-box;">
+                <option value="Transfermóvil">📱 Transfermóvil</option>
+                <option value="EnZona">💳 EnZona</option>
+                <option value="Banco">🏦 Banco (ventanilla)</option>
+                <option value="Efectivo">💵 Efectivo</option>
+            </select>
+            <button onclick="registrarPagoTributo('${codigo}','${clave}')" style="width:100%;padding:15px;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#0a0f0d;border:none;border-radius:14px;font-size:16px;font-weight:700;font-family:'Syne',Arial,sans-serif;cursor:pointer;">✅ Confirmar Pago</button>
+        </div>` : ''}
+        <div style="height:40px;"></div>
+    `;
+}
+
+function marcarPagado(codigo, claveMes) {
+    abrirDetalleTributo(codigo);
+}
+
+function registrarPagoTributo(codigo, clave) {
+    const fecha = document.getElementById("pagoFecha").value;
+    const recibo = document.getElementById("pagoRecibo").value;
+    const canal = document.getElementById("pagoCanal").value;
+    if (!DB.configuracion.onatPagos) DB.configuracion.onatPagos = {};
+    DB.configuracion.onatPagos[clave] = { fecha: new Date(fecha).toISOString(), recibo, canal };
+    DB.guardar();
+    mostrarToast("✅ Pago registrado");
+    volverONAT();
+    renderTributos();
+}
+
+// ── Calendario Fiscal ──
+function renderCalendarioFiscal() {
+    const MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+    const anio = 2026;
+    const ahora = new Date();
+    const pagos = DB.configuracion.onatPagos || {};
+    const moneda = DB.configuracion.moneda || "CUP";
+    const el = document.getElementById("calendarioFiscal");
+
+    el.innerHTML = MESES.map((nombreMes, mes) => {
+        const ingresos = ingresosDelMes(mes, anio);
+        const gastos = gastosDelMes(mes, anio);
+        const tributos = calcularTributos(ingresos, gastos, mes, anio);
+        const aplicables = Object.values(tributos).filter(t => t.esAplicable && t.importe > 0);
+        const claveMes = `${anio}-${mes}`;
+
+        const totalMes = aplicables.reduce((s,t) => s + t.importe, 0);
+        const pagados = aplicables.filter(t => pagos[`${claveMes}-${t.codigo}`]);
+        const estadoMes = pagados.length === aplicables.length ? "🟢" : aplicables.some(t => {
+            const lim = new Date(anio, mes, t.diaLimite);
+            return ahora > lim && !pagos[`${claveMes}-${t.codigo}`];
+        }) ? "🔴" : "🟡";
+
+        return `
+        <div class="onat-cal-mes">
+            <div class="onat-cal-header">
+                <span class="onat-cal-nombre">${estadoMes} ${nombreMes} ${anio}</span>
+                <span class="onat-cal-total">${totalMes.toLocaleString("es-CU")} ${moneda}</span>
+            </div>
+            ${aplicables.map(t => {
+                const clave = `${claveMes}-${t.codigo}`;
+                const pagado = pagos[clave];
+                const limite = new Date(anio, mes, t.diaLimite);
+                const vencido = ahora > limite && !pagado;
+                return `
+                <div class="onat-cal-item ${pagado ? 'pagado' : vencido ? 'vencido' : ''}" onclick="abrirDetalleTributo('${t.codigo}')">
+                    <span>${pagado ? "✅" : vencido ? "🔴" : "⏳"} ${t.codigo}</span>
+                    <span>${t.importe.toLocaleString("es-CU")} ${moneda} · Día ${t.diaLimite}</span>
+                </div>`;
+            }).join("")}
+        </div>`;
+    }).join("");
+}
+
+// ── Simulador ──
+function calcularSimulacion() {
+    const ventas = Number(document.getElementById("simVentas").value) || 0;
+    const gastos = Number(document.getElementById("simGastos").value) || 0;
+    const mes = new Date().getMonth();
+    const anio = new Date().getFullYear();
+    const moneda = DB.configuracion.moneda || "CUP";
+    const tributos = calcularTributos(ventas, gastos, mes, anio);
+    const total = Object.values(tributos).filter(t => t.esAplicable).reduce((s,t) => s + t.importe, 0);
+    const utilidad = ventas - gastos;
+    const neto = utilidad - total;
+
+    document.getElementById("simResultado").innerHTML = `
+        <div class="dashfin-row"><span>Ventas simuladas</span><strong>${ventas.toLocaleString("es-CU")} ${moneda}</strong></div>
+        <div class="dashfin-row dashfin-resta"><span>− Gastos deducibles</span><strong>${gastos.toLocaleString("es-CU")} ${moneda}</strong></div>
+        <div class="dashfin-sep"></div>
+        <div class="dashfin-row dashfin-subtotal"><span>= Utilidad estimada</span><strong>${utilidad.toLocaleString("es-CU")} ${moneda}</strong></div>
+        <div class="dashfin-row dashfin-resta"><span>− Total tributos estimados</span><strong>${total.toLocaleString("es-CU")} ${moneda}</strong></div>
+        <div class="dashfin-sep"></div>
+        <div class="dashfin-row dashfin-total"><span>= Resultado neto</span><strong>${neto.toLocaleString("es-CU")} ${moneda}</strong></div>
+    `;
+
+    document.getElementById("simDetalle").innerHTML = Object.values(tributos)
+        .filter(t => t.esAplicable && t.importe > 0)
+        .map((t,i,arr) => `
+            <div class="cfg-row" style="cursor:default;">
+                <div class="cfg-row-body"><span class="cfg-row-titulo">${t.codigo}</span><span class="cfg-row-sub">${t.nombre}</span></div>
+                <strong style="font-family:'Syne',Arial,sans-serif;color:var(--warn);">${t.importe.toLocaleString("es-CU")} ${moneda}</strong>
+            </div>${i<arr.length-1?'<div class="cfg-row-sep"></div>':''}`).join("");
+}
+
+// ── Expediente ──
+function cargarExpediente() {
+    const exp = DB.configuracion.expedienteFiscal || {};
+    const cfg = getCfgFiscal();
+    ["NIT","Nombre","Municipio","Actividad","Banco","Sucursal","Cuenta","Inspector","TelONAT","Correo"].forEach(k => {
+        const el = document.getElementById("exped" + k);
+        if (el) el.value = exp[k] || "";
+    });
+    document.getElementById("cfgTasa0114022").value = cfg.tasa0114022;
+    document.getElementById("cfgTasa0510122").value = cfg.tasa0510122;
+    document.getElementById("cfgMinExentoMensual").value = cfg.minExentoMensual;
+    document.getElementById("cfgMinExentoAnual").value = cfg.minExentoAnual;
+    document.getElementById("cfgSalarioEmpleados").value = cfg.salarioEmpleados;
+    document.getElementById("cfgBaseContrib").value = cfg.baseContribTitular;
+}
+
+function guardarExpediente() {
+    const exp = {};
+    ["NIT","Nombre","Municipio","Actividad","Banco","Sucursal","Cuenta","Inspector","TelONAT","Correo"].forEach(k => {
+        const el = document.getElementById("exped" + k);
+        if (el) exp[k] = el.value;
+    });
+    DB.configuracion.expedienteFiscal = exp;
+    if (!DB.configuracion.fiscal) DB.configuracion.fiscal = {};
+    DB.configuracion.fiscal.tasa0114022 = Number(document.getElementById("cfgTasa0114022").value) || 10;
+    DB.configuracion.fiscal.tasa0510122 = Number(document.getElementById("cfgTasa0510122").value) || 5;
+    DB.configuracion.fiscal.minExentoMensual = Number(document.getElementById("cfgMinExentoMensual").value) || 3260;
+    DB.configuracion.fiscal.minExentoAnual = Number(document.getElementById("cfgMinExentoAnual").value) || 39120;
+    DB.configuracion.fiscal.salarioEmpleados = Number(document.getElementById("cfgSalarioEmpleados").value) || 0;
+    DB.configuracion.fiscal.baseContribTitular = Number(document.getElementById("cfgBaseContrib").value) || 800;
+    DB.guardar();
+    mostrarToast("✅ Expediente fiscal guardado");
+}
+
+// ── Exportar PDF ONAT ──
+function exportarReporteONAT() {
+    const ahora = new Date();
+    const mes = ahora.getMonth();
+    const anio = ahora.getFullYear();
+    const moneda = DB.configuracion.moneda || "CUP";
+    const exp = DB.configuracion.expedienteFiscal || {};
+    const ingresos = ingresosDelMes(mes, anio);
+    const gastos = gastosDelMes(mes, anio);
+    const tributos = calcularTributos(ingresos, gastos, mes, anio);
+    const MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    doc.setFontSize(16);
+    doc.text("INVENTARY ARB — Reporte Fiscal ONAT", 14, 15);
+    doc.setFontSize(11);
+    doc.text(`NIT: ${exp.NIT || "—"} · ${exp.Nombre || "—"}`, 14, 23);
+    doc.text(`Período: ${MESES[mes]} ${anio}`, 14, 30);
+    doc.setFontSize(10);
+    let y = 40;
+    doc.text(`Ingresos del mes: ${ingresos.toLocaleString("es-CU")} ${moneda}`, 14, y); y+=7;
+    doc.text(`Gastos deducibles: ${gastos.toLocaleString("es-CU")} ${moneda}`, 14, y); y+=7;
+    doc.text(`Utilidad: ${(ingresos-gastos).toLocaleString("es-CU")} ${moneda}`, 14, y); y+=12;
+    doc.setFontSize(12); doc.text("Tributos del mes:", 14, y); y+=8; doc.setFontSize(10);
+    Object.values(tributos).filter(t=>t.esAplicable&&t.importe>0).forEach(t => {
+        doc.text(`${t.codigo} — ${t.nombre}: ${t.importe.toLocaleString("es-CU")} ${moneda}`, 14, y); y+=7;
+    });
+    const total = Object.values(tributos).filter(t=>t.esAplicable).reduce((s,t)=>s+t.importe,0);
+    y+=3; doc.setFontSize(12); doc.text(`Total tributos: ${total.toLocaleString("es-CU")} ${moneda}`, 14, y);
+    doc.save(`onat-${MESES[mes].toLowerCase()}-${anio}.pdf`);
 }
