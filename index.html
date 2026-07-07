@@ -62,9 +62,9 @@
       <div class="menu-icon icon-blue">🏪</div>
       <div class="menu-text"><h4>Almacenes</h4><p id="menuTotalAlmacenes">0 almacenes</p></div>
     </div>
-    <div class="menu-btn" onclick="proximamente('Proveedores')">
+    <div class="menu-btn" onclick="abrirProveedores()">
       <div class="menu-icon icon-teal">🤝</div>
-      <div class="menu-text"><h4>Proveedores</h4><p>Próximamente</p></div>
+      <div class="menu-text"><h4>Proveedores</h4><p id="menuResumenProveedores">Ver proveedores</p></div>
     </div>
     <div class="menu-btn" onclick="abrirClientes()">
       <div class="menu-icon icon-gold">👥</div>
@@ -190,7 +190,12 @@
   <button id="btnMasDetalles" class="btn-detalles">＋ Más detalles (opcional)</button>
   <div id="masDetalles" class="oculto">
     <label>Marca</label><input type="text" id="marca" placeholder="Ej: Nestlé">
-    <label>Proveedor</label><input type="text" id="proveedor" placeholder="Ej: Mayorista Habana">
+    <label>Proveedor</label>
+    <div class="campo-producto-sel" onclick="abrirSheetProveedores('producto')" style="margin-bottom:8px;">
+      <span id="textoProveedorSel" class="texto-prod-placeholder">Toca para seleccionar proveedor...</span>
+      <span class="arrow-prod">›</span>
+    </div>
+    <input type="hidden" id="proveedor">
     <label>Stock mínimo</label><input type="number" id="stock" placeholder="Ej: 5" min="0">
     <label>Fecha de vencimiento</label><input type="date" id="vencimiento">
     <label>Observaciones</label><textarea id="observaciones" placeholder="Notas adicionales..."></textarea>
@@ -558,6 +563,130 @@
   <textarea id="transfNota" placeholder="Observaciones..."></textarea>
   <button id="btnConfirmarTransferencia">🔄 Transferir</button>
 </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!-- PANTALLA: PROVEEDORES                           -->
+<!-- ═══════════════════════════════════════════════ -->
+<div id="pantallaProveedores" class="pantalla">
+  <div class="header">
+    <button class="btn-back" onclick="volverInicio()">‹</button>
+    <div class="header-left"><h1>Proveedores</h1><p>Gestión de compras</p></div>
+    <button class="btn-tool" onclick="toggleMenuOpcionesProveedores()">⋯</button>
+  </div>
+  <div id="menuOpcionesProveedores" class="menu-opciones oculto">
+    <button onclick="exportarProveedoresPDF()">📄 Exportar PDF</button>
+    <button onclick="exportarProveedoresExcel()">📊 Exportar Excel</button>
+  </div>
+  <div class="gas-resumen-grid">
+    <div class="gas-resumen-card"><span class="gas-resumen-icon">🤝</span><strong id="provResumenTotal">0</strong><span>Proveedores</span></div>
+    <div class="gas-resumen-card gas-resumen-destacada"><span class="gas-resumen-icon">💰</span><strong id="provResumenComprasMes">0</strong><span>Compras mes</span></div>
+    <div class="gas-resumen-card"><span class="gas-resumen-icon">📦</span><strong id="provResumenProductos">0</strong><span>Productos</span></div>
+    <div class="gas-resumen-card"><span class="gas-resumen-icon">⭐</span><strong id="provResumenFavorito">—</strong><span>Principal</span></div>
+  </div>
+  <div class="toolbar">
+    <input type="text" id="buscarProveedor" placeholder="🔍 Buscar proveedor..." oninput="mostrarProveedores()">
+  </div>
+  <div id="listaProveedores" style="padding:0 20px 120px; display:flex; flex-direction:column; gap:10px;"></div>
+  <button id="btnNuevoProveedor" onclick="abrirModalProveedor()">＋</button>
+</div>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!-- PANTALLA: PERFIL DE PROVEEDOR                   -->
+<!-- ═══════════════════════════════════════════════ -->
+<div id="pantallaPerfilProveedor" class="pantalla">
+  <div class="header">
+    <button class="btn-back" onclick="volverProveedores()">‹</button>
+    <div class="header-left"><h1 id="perfilProvNombre">Proveedor</h1><p id="perfilProvContacto">—</p></div>
+    <button class="btn-tool" onclick="abrirModalProveedor(proveedorActualId)">✏️</button>
+  </div>
+  <div style="padding:10px 20px 4px; display:flex; gap:8px;">
+    <button class="cli-btn-abono" id="btnLlamarProv" onclick="llamarProveedor()">📞 Llamar</button>
+    <button class="cli-btn-abono" id="btnWhatsAppProv" onclick="whatsAppProveedor()">💬 WhatsApp</button>
+  </div>
+  <div class="alm-tabs" style="margin-top:8px;">
+    <button class="alm-tab activo" id="provTabEstadisticas" onclick="cambiarTabProveedor('estadisticas')">Estadísticas</button>
+    <button class="alm-tab" id="provTabProductos" onclick="cambiarTabProveedor('productos')">Productos</button>
+    <button class="alm-tab" id="provTabHistorial" onclick="cambiarTabProveedor('historial')">Historial</button>
+  </div>
+  <div id="provContenidoEstadisticas" class="alm-tab-contenido">
+    <div class="alm-stats-grid" style="padding:14px 20px 4px;">
+      <div class="alm-stat-card"><span class="alm-stat-icon">📦</span><strong id="provStatProductos">0</strong><span>Productos</span></div>
+      <div class="alm-stat-card"><span class="alm-stat-icon">🛒</span><strong id="provStatComprasMes">0</strong><span>Compras mes</span></div>
+      <div class="alm-stat-card"><span class="alm-stat-icon">📅</span><strong id="provStatComprasAnio">0</strong><span>Compras año</span></div>
+    </div>
+    <div class="cfg-grupo-label">ÚLTIMA COMPRA</div>
+    <div class="cfg-grupo" style="margin:0 20px 14px;">
+      <div class="cfg-row" style="cursor:default;">
+        <div class="cfg-row-body"><span class="cfg-row-titulo" id="provUltimaCompraFecha">—</span><span class="cfg-row-sub" id="provUltimaCompraDetalle">Sin compras registradas</span></div>
+      </div>
+    </div>
+    <div class="cfg-grupo-label">PARTICIPACIÓN EN COMPRAS</div>
+    <div class="cfg-grupo" style="margin:0 20px 14px;">
+      <div class="cfg-row" style="cursor:default;">
+        <div class="cfg-row-body"><span class="cfg-row-titulo">% del total de compras</span><span class="cfg-row-sub" id="provPorcentajeCompras">—</span></div>
+        <strong id="provPorcentajeVal" style="font-family:'Syne',Arial,sans-serif;color:var(--accent);">0%</strong>
+      </div>
+    </div>
+    <div class="cfg-grupo-label">DATOS DE CONTACTO</div>
+    <div id="provDatosContacto" class="cfg-grupo" style="margin:0 20px 100px;"></div>
+  </div>
+  <div id="provContenidoProductos" class="alm-tab-contenido oculto">
+    <div id="provListaProductos" style="padding:10px 20px 100px; display:flex; flex-direction:column; gap:8px;"></div>
+  </div>
+  <div id="provContenidoHistorial" class="alm-tab-contenido oculto">
+    <div id="provListaHistorial" style="padding:10px 20px 100px; display:flex; flex-direction:column; gap:8px;"></div>
+  </div>
+</div>
+
+<!-- MODAL: NUEVO / EDITAR PROVEEDOR -->
+<div id="modalProveedor" class="modal oculto">
+<div class="modal-contenido">
+  <div class="modal-header">
+    <h2 id="modalProveedorTitulo">🤝 Nuevo Proveedor</h2>
+    <button class="btn-cerrar" onclick="cerrarModalProveedor()">✕</button>
+  </div>
+  <label>Nombre comercial *</label>
+  <input type="text" id="provNombre" placeholder="Ej: Distribuidora Habana">
+  <label>Persona de contacto</label>
+  <input type="text" id="provContacto" placeholder="Ej: Carlos Pérez">
+  <label>Teléfono</label>
+  <input type="tel" id="provTelefono" placeholder="Ej: 53512345">
+  <label>Dirección</label>
+  <input type="text" id="provDireccion" placeholder="Ej: Calle 23, La Habana">
+  <label>Municipio</label>
+  <input type="text" id="provMunicipio" placeholder="Municipio">
+  <label>Banco / Cuenta (opcional)</label>
+  <input type="text" id="provBanco" placeholder="Banco y número de cuenta">
+  <label>Correo (opcional)</label>
+  <input type="email" id="provCorreo" placeholder="correo@ejemplo.com">
+  <div class="cfg-toggle-row2" style="padding:10px 0 4px;">
+    <div class="cfg-row-body">
+      <span class="cfg-row-titulo">⭐ Proveedor favorito</span>
+      <span class="cfg-row-sub">Aparece primero al seleccionar proveedor</span>
+    </div>
+    <label class="cfg-toggle"><input type="checkbox" id="provFavorito"><span class="cfg-toggle-slider"></span></label>
+  </div>
+  <label>Observaciones</label>
+  <textarea id="provObservaciones" placeholder="Notas sobre este proveedor..."></textarea>
+  <button id="btnGuardarProveedor">💾 Guardar Proveedor</button>
+  <button id="btnEliminarProveedor" class="oculto" onclick="eliminarProveedorActual()" style="width:100%;margin-top:10px;padding:14px;background:rgba(255,107,74,0.1);border:1px solid rgba(255,107,74,0.25);border-radius:14px;color:var(--warn);font-size:14px;font-weight:600;cursor:pointer;">🗑️ Eliminar Proveedor</button>
+</div>
+</div>
+
+<!-- SHEET: SELECCIÓN DE PROVEEDOR -->
+<div id="sheetProveedores" class="sheet-overlay oculto" onclick="cerrarSheetProveedoresSiOverlay(event)">
+  <div class="sheet-contenido">
+    <div class="sheet-handle"></div>
+    <div class="sheet-header"><h3>Seleccionar Proveedor</h3><button onclick="cerrarSheetProveedores()">✕</button></div>
+    <div class="sheet-buscador-wrap">
+      <input type="text" id="sheetBuscadorProveedores" class="sheet-buscador" placeholder="🔍 Buscar proveedor..." oninput="renderSheetListaProveedores()">
+    </div>
+    <div id="sheetListaProveedores" class="sheet-lista"></div>
+    <div class="sheet-footer">
+      <button onclick="abrirModalProveedor()" style="background:none;border:none;color:var(--accent);font-size:13px;cursor:pointer;">＋ Nuevo proveedor</button>
+    </div>
+  </div>
 </div>
 
 <!-- ═══════════════════════════════════════════════ -->

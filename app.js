@@ -7,6 +7,7 @@ const DB = {
         this.movimientos = JSON.parse(localStorage.getItem("movimientos")) || [];
         this.gastos = JSON.parse(localStorage.getItem("gastos")) || [];
         this.clientes = JSON.parse(localStorage.getItem("clientes")) || [];
+        this.proveedores = JSON.parse(localStorage.getItem("proveedores")) || [];
         this.almacenes = JSON.parse(localStorage.getItem("almacenes")) || [
             { id: "alm1", nombre: "Almacén principal" },
             { id: "alm2", nombre: "Tienda" }
@@ -47,6 +48,7 @@ const DB = {
         localStorage.setItem("movimientos", JSON.stringify(this.movimientos));
         localStorage.setItem("gastos", JSON.stringify(this.gastos));
         localStorage.setItem("clientes", JSON.stringify(this.clientes));
+        localStorage.setItem("proveedores", JSON.stringify(this.proveedores));
         localStorage.setItem("almacenes", JSON.stringify(this.almacenes));
         localStorage.setItem("configuracion", JSON.stringify(this.configuracion));
     },
@@ -194,6 +196,23 @@ const DB = {
 
     buscarCliente(id) { return this.clientes.find(c => c.id === id); },
 
+    agregarProveedor(datos) {
+        const p = { ...datos, id: "prov_" + Date.now(), fechaCreacion: new Date().toISOString() };
+        this.proveedores.push(p); this.guardar(); return p;
+    },
+    actualizarProveedor(id, datos) {
+        const idx = this.proveedores.findIndex(p => p.id === id);
+        if (idx !== -1) { this.proveedores[idx] = { ...this.proveedores[idx], ...datos }; this.guardar(); }
+    },
+    eliminarProveedor(id) { this.proveedores = this.proveedores.filter(p => p.id !== id); this.guardar(); },
+    buscarProveedor(id) { return this.proveedores.find(p => p.id === id); },
+    comprasProveedor(nombre) { return this.movimientos.filter(m => m.tipo === "entrada" && m.proveedor === nombre); },
+    totalCompradoProveedor(nombre, inicio, fin) {
+        return this.comprasProveedor(nombre)
+            .filter(m => { const f = new Date(m.fecha); return f >= inicio && f <= fin; })
+            .reduce((s, m) => s + (m.precioUnitario||0)*(m.cantidad||0), 0);
+    },
+
     // Calcula saldo pendiente (fiados no saldados - abonos)
     saldoCliente(id) {
         const fiados = this.movimientos.filter(m => m.clienteId === id && m.tipo === "salida" && m.metodoPago === "fiado" && !m.saldado);
@@ -254,6 +273,9 @@ let editandoClienteId = null;
 let tabClienteActual = "fiados";
 let vistaReporteActual = "dia";
 let onatTabActual = "panel";
+let proveedorActualId = null;
+let editandoProveedorId = null;
+let tabProveedorActual = "estadisticas";
 
 const CATEGORIAS_GASTO = {
     combustible: { nombre: "Combustible", icono: "⛽" },
@@ -386,6 +408,23 @@ function abrirReportes() {
     document.getElementById("btnFlotante").classList.add("ocultar-boton");
     vistaReporteActual = "dia";
     actualizarReporte();
+}
+
+function abrirProveedores() {
+    mostrarPantalla("pantallaProveedores");
+    document.getElementById("btnFlotante").classList.add("ocultar-boton");
+    mostrarProveedores();
+}
+function volverProveedores() {
+    mostrarPantalla("pantallaProveedores", "atras");
+    document.getElementById("btnFlotante").classList.add("ocultar-boton");
+    mostrarProveedores();
+}
+function abrirPerfilProveedor(id) {
+    proveedorActualId = id;
+    mostrarPantalla("pantallaPerfilProveedor");
+    document.getElementById("btnFlotante").classList.add("ocultar-boton");
+    actualizarPerfilProveedor();
 }
 
 function abrirONAT() {
@@ -773,6 +812,8 @@ function limpiarFormulario() {
     document.getElementById("escalasContenedor").classList.add("oculto");
     escalasTemp = [];
     renderEscalasProducto();
+    const tpEl = document.getElementById("textoProveedorSel");
+    if (tpEl) { tpEl.className = "texto-prod-placeholder"; tpEl.innerText = "Toca para seleccionar proveedor..."; }
 }
 
 // ═══════════════════════════════════════════════
@@ -923,6 +964,9 @@ function editarProducto(id) {
     document.getElementById("almacen").value = p.almacen || "";
     document.getElementById("marca").value = p.marca || "";
     document.getElementById("proveedor").value = p.proveedor || "";
+    const tpEl = document.getElementById("textoProveedorSel");
+    if (tpEl && p.proveedor) { tpEl.className = "texto-prod-seleccionado"; tpEl.innerText = `🤝 ${p.proveedor}`; }
+    else if (tpEl) { tpEl.className = "texto-prod-placeholder"; tpEl.innerText = "Toca para seleccionar proveedor..."; }
     document.getElementById("stock").value = p.stockMinimo || "";
     document.getElementById("vencimiento").value = p.vencimiento || "";
     document.getElementById("observaciones").value = p.observaciones || "";
@@ -3919,4 +3963,275 @@ function exportarReporteONAT() {
     const total = Object.values(tributos).filter(t=>t.esAplicable).reduce((s,t)=>s+t.importe,0);
     y+=3; doc.setFontSize(12); doc.text(`Total tributos: ${total.toLocaleString("es-CU")} ${moneda}`, 14, y);
     doc.save(`onat-${MESES[mes].toLowerCase()}-${anio}.pdf`);
+}
+
+// ═══════════════════════════════════════════════
+// MÓDULO PROVEEDORES
+// ═══════════════════════════════════════════════
+function mostrarProveedores() {
+    const lista = document.getElementById("listaProveedores");
+    const texto = document.getElementById("buscarProveedor").value.toLowerCase();
+    const moneda = DB.configuracion.moneda || "CUP";
+    const ahora = new Date();
+    const iniMes = new Date(ahora.getFullYear(), ahora.getMonth(), 1);
+    const finMes = new Date(ahora.getFullYear(), ahora.getMonth() + 1, 0, 23, 59, 59);
+    let proveedores = [...DB.proveedores].sort((a, b) => (b.favorito?1:0)-(a.favorito?1:0));
+    if (texto) proveedores = proveedores.filter(p => p.nombre.toLowerCase().includes(texto) || (p.contacto||"").toLowerCase().includes(texto));
+    const totalComprasMes = DB.proveedores.reduce((s, p) => s + DB.totalCompradoProveedor(p.nombre, iniMes, finMes), 0);
+    const productosConProv = new Set(DB.productos.filter(p => p.proveedor).map(p => p.proveedor)).size;
+    const favorito = DB.proveedores.find(p => p.favorito);
+    document.getElementById("provResumenTotal").innerText = DB.proveedores.length;
+    document.getElementById("provResumenComprasMes").innerText = totalComprasMes.toLocaleString("es-CU");
+    document.getElementById("provResumenProductos").innerText = productosConProv;
+    document.getElementById("provResumenFavorito").innerText = favorito ? favorito.nombre.split(" ")[0] : "—";
+    const menuEl = document.getElementById("menuResumenProveedores");
+    if (menuEl) menuEl.innerText = DB.proveedores.length + " proveedor" + (DB.proveedores.length !== 1 ? "es" : "");
+    if (proveedores.length === 0) {
+        lista.innerHTML = `<p style="text-align:center;color:var(--text2);padding:40px 0;">${DB.proveedores.length === 0 ? "No hay proveedores registrados." : "Sin resultados."}</p>`;
+        return;
+    }
+    const totalComprasGeneral = DB.movimientos.filter(m => m.tipo === "entrada").reduce((s, m) => s + (m.precioUnitario||0)*(m.cantidad||0), 0);
+    lista.innerHTML = proveedores.map(p => {
+        const comprasMes = DB.totalCompradoProveedor(p.nombre, iniMes, finMes);
+        const productosCount = DB.productos.filter(pr => pr.proveedor === p.nombre).length;
+        const ultimaCompra = DB.comprasProveedor(p.nombre).sort((a, b) => new Date(b.fecha) - new Date(a.fecha))[0];
+        const diasUltima = ultimaCompra ? Math.floor((ahora - new Date(ultimaCompra.fecha)) / (1000*60*60*24)) : null;
+        const ultTxt = diasUltima === null ? "Sin compras" : diasUltima === 0 ? "Hoy" : diasUltima === 1 ? "Ayer" : `Hace ${diasUltima} días`;
+        const pct = totalComprasGeneral > 0 ? Math.round((DB.totalCompradoProveedor(p.nombre, new Date(0), new Date()) / totalComprasGeneral) * 100) : 0;
+        return `
+        <div class="prov-card">
+            <div class="prov-card-header" onclick="abrirPerfilProveedor('${p.id}')">
+                <div class="prov-card-icono">🤝</div>
+                <div class="prov-card-info">
+                    <h4>${p.favorito ? "⭐ " : ""}${p.nombre}</h4>
+                    ${p.contacto ? `<p>👤 ${p.contacto}</p>` : ""}
+                    ${p.telefono ? `<p>📞 ${p.telefono}</p>` : ""}
+                    <p>📦 ${productosCount} producto${productosCount!==1?"s":""} · ${pct}% compras · 🕐 ${ultTxt}</p>
+                </div>
+                <div class="prov-card-monto"><strong>${comprasMes.toLocaleString("es-CU")}</strong><span>${moneda}/mes</span></div>
+            </div>
+            <div class="prov-card-actions">
+                ${p.telefono ? `<button onclick="window.open('tel:${p.telefono}')">📞 Llamar</button>` : ""}
+                ${p.telefono ? `<button onclick="window.open('https://wa.me/53${p.telefono.replace(/\D/g,'')}')">💬 WhatsApp</button>` : ""}
+                <button onclick="abrirPerfilProveedor('${p.id}')">👁 Ver perfil</button>
+            </div>
+        </div>`;
+    }).join("");
+}
+
+function actualizarPerfilProveedor() {
+    const p = DB.buscarProveedor(proveedorActualId); if (!p) return;
+    document.getElementById("perfilProvNombre").innerText = (p.favorito?"⭐ ":"") + p.nombre;
+    document.getElementById("perfilProvContacto").innerText = p.contacto || p.municipio || "—";
+    document.getElementById("btnLlamarProv").style.display = p.telefono ? "block" : "none";
+    document.getElementById("btnWhatsAppProv").style.display = p.telefono ? "block" : "none";
+    cambiarTabProveedor(tabProveedorActual);
+}
+
+function cambiarTabProveedor(tab) {
+    tabProveedorActual = tab;
+    ["estadisticas","productos","historial"].forEach(t => {
+        document.getElementById("provTab"+t.charAt(0).toUpperCase()+t.slice(1)).classList.toggle("activo", t===tab);
+        document.getElementById("provContenido"+t.charAt(0).toUpperCase()+t.slice(1)).classList.toggle("oculto", t!==tab);
+    });
+    if (tab==="estadisticas") renderEstadisticasProveedor();
+    else if (tab==="productos") renderProductosProveedor();
+    else if (tab==="historial") renderHistorialProveedor();
+}
+
+function renderEstadisticasProveedor() {
+    const p = DB.buscarProveedor(proveedorActualId); if (!p) return;
+    const moneda = DB.configuracion.moneda || "CUP";
+    const ahora = new Date();
+    const iniMes = new Date(ahora.getFullYear(), ahora.getMonth(), 1);
+    const finMes = new Date(ahora.getFullYear(), ahora.getMonth()+1, 0, 23,59,59);
+    const iniAnio = new Date(ahora.getFullYear(), 0, 1);
+    const productos = DB.productos.filter(pr => pr.proveedor === p.nombre);
+    const comprasMes = DB.totalCompradoProveedor(p.nombre, iniMes, finMes);
+    const comprasAnio = DB.totalCompradoProveedor(p.nombre, iniAnio, new Date());
+    const totalGeneral = DB.movimientos.filter(m=>m.tipo==="entrada").reduce((s,m)=>s+(m.precioUnitario||0)*(m.cantidad||0),0);
+    const pct = totalGeneral > 0 ? Math.round((DB.totalCompradoProveedor(p.nombre,new Date(0),new Date())/totalGeneral)*100) : 0;
+    const ultimaCompra = DB.comprasProveedor(p.nombre).sort((a,b)=>new Date(b.fecha)-new Date(a.fecha))[0];
+    document.getElementById("provStatProductos").innerText = productos.length;
+    document.getElementById("provStatComprasMes").innerText = comprasMes.toLocaleString("es-CU");
+    document.getElementById("provStatComprasAnio").innerText = comprasAnio.toLocaleString("es-CU");
+    document.getElementById("provPorcentajeVal").innerText = pct+"%";
+    document.getElementById("provPorcentajeCompras").innerText = `${pct}% del total de todas tus compras`;
+    if (ultimaCompra) {
+        const prod = DB.buscarProducto(ultimaCompra.productoId);
+        document.getElementById("provUltimaCompraFecha").innerText = new Date(ultimaCompra.fecha).toLocaleDateString("es-CU");
+        document.getElementById("provUltimaCompraDetalle").innerText = prod ? `${prod.nombre} · ${(ultimaCompra.precioUnitario||0).toLocaleString("es-CU")} ${moneda}/u` : "—";
+    }
+    document.getElementById("provDatosContacto").innerHTML = [
+        p.contacto ? `<div class="cfg-row" style="cursor:default;"><div class="cfg-row-body"><span class="cfg-row-titulo">👤 Contacto</span><span class="cfg-row-sub">${p.contacto}</span></div></div><div class="cfg-row-sep"></div>` : "",
+        p.telefono ? `<div class="cfg-row" style="cursor:pointer;" onclick="window.open('tel:${p.telefono}')"><div class="cfg-row-body"><span class="cfg-row-titulo">📞 Teléfono</span><span class="cfg-row-sub">${p.telefono}</span></div></div><div class="cfg-row-sep"></div>` : "",
+        p.direccion ? `<div class="cfg-row" style="cursor:default;"><div class="cfg-row-body"><span class="cfg-row-titulo">📍 Dirección</span><span class="cfg-row-sub">${p.direccion}</span></div></div><div class="cfg-row-sep"></div>` : "",
+        p.banco ? `<div class="cfg-row" style="cursor:default;"><div class="cfg-row-body"><span class="cfg-row-titulo">🏦 Banco</span><span class="cfg-row-sub">${p.banco}</span></div></div><div class="cfg-row-sep"></div>` : "",
+        p.observaciones ? `<div class="cfg-row" style="cursor:default;"><div class="cfg-row-body"><span class="cfg-row-titulo">📝 Notas</span><span class="cfg-row-sub">${p.observaciones}</span></div></div>` : ""
+    ].join("");
+}
+
+function renderProductosProveedor() {
+    const p = DB.buscarProveedor(proveedorActualId); if (!p) return;
+    const moneda = DB.configuracion.moneda || "CUP";
+    const productos = DB.productos.filter(pr => pr.proveedor === p.nombre);
+    const el = document.getElementById("provListaProductos");
+    if (productos.length === 0) { el.innerHTML = `<p style="text-align:center;color:var(--text2);padding:30px 0;">No hay productos asociados.</p>`; return; }
+    el.innerHTML = productos.map(prod => {
+        const compras = DB.movimientos.filter(m=>m.tipo==="entrada"&&m.productoId===prod.id&&m.proveedor===p.nombre).sort((a,b)=>new Date(b.fecha)-new Date(a.fecha));
+        const ultimoPrecio = compras[0]?.precioUnitario || prod.compra || 0;
+        const precioPromedio = compras.length > 0 ? Math.round(compras.reduce((s,m)=>s+(m.precioUnitario||0),0)/compras.length) : 0;
+        const ultimaFecha = compras[0] ? new Date(compras[0].fecha).toLocaleDateString("es-CU") : "—";
+        const precios = compras.slice(0,4).map(m=>m.precioUnitario||0).reverse();
+        const tendencia = precios.length>=2 ? (precios[precios.length-1]>precios[0]?"📈":precios[precios.length-1]<precios[0]?"📉":"→") : "";
+        return `
+        <div class="gas-card" style="flex-direction:column;align-items:flex-start;gap:6px;">
+            <div style="display:flex;justify-content:space-between;width:100%;">
+                <div><h4 style="font-size:14px;font-weight:600;">${ICONOS[prod.categoria]||"📦"} ${prod.nombre} ${tendencia}</h4>
+                <p style="font-size:12px;color:var(--text2);">Stock: ${prod.cantidad} ${prod.unidad||""} · ${ultimaFecha}</p></div>
+                <div style="text-align:right;"><div style="font-family:'Syne',Arial,sans-serif;font-weight:700;color:var(--warn);">${ultimoPrecio.toLocaleString("es-CU")} ${moneda}</div>
+                <div style="font-size:11px;color:var(--text2);">Prom: ${precioPromedio.toLocaleString("es-CU")}</div></div>
+            </div>
+            ${precios.length>=2?`<div style="font-size:11px;color:var(--text2);">Historial: ${precios.map(pr=>pr.toLocaleString("es-CU")).join(" → ")} ${moneda}</div>`:""}
+        </div>`;
+    }).join("");
+}
+
+function renderHistorialProveedor() {
+    const p = DB.buscarProveedor(proveedorActualId); if (!p) return;
+    const moneda = DB.configuracion.moneda || "CUP";
+    const compras = DB.comprasProveedor(p.nombre).sort((a,b)=>new Date(b.fecha)-new Date(a.fecha));
+    const el = document.getElementById("provListaHistorial");
+    if (compras.length === 0) { el.innerHTML = `<p style="text-align:center;color:var(--text2);padding:30px 0;">Sin compras registradas.</p>`; return; }
+    el.innerHTML = compras.map(m => {
+        const prod = DB.buscarProducto(m.productoId);
+        const total = (m.precioUnitario||0)*(m.cantidad||0);
+        return `
+        <div class="gas-card" style="flex-direction:column;align-items:flex-start;gap:4px;">
+            <div style="display:flex;justify-content:space-between;width:100%;">
+                <div><h4 style="font-size:14px;font-weight:600;">📥 ${prod?prod.nombre:"Producto eliminado"}</h4>
+                <p style="font-size:12px;color:var(--text2);">${m.cantidad} uds × ${(m.precioUnitario||0).toLocaleString("es-CU")} ${moneda} · ${new Date(m.fecha).toLocaleDateString("es-CU")}</p>
+                ${m.factura?`<p style="font-size:11px;color:var(--text3);">Factura: ${m.factura}</p>`:""}</div>
+                <strong style="font-family:'Syne',Arial,sans-serif;color:var(--accent);">${total.toLocaleString("es-CU")} ${moneda}</strong>
+            </div>
+        </div>`;
+    }).join("");
+}
+
+function abrirModalProveedor(id) {
+    if (id) {
+        const p = DB.buscarProveedor(id); if (!p) return;
+        editandoProveedorId = id;
+        document.getElementById("modalProveedorTitulo").innerText = "✏️ Editar Proveedor";
+        ["provNombre","provContacto","provTelefono","provDireccion","provMunicipio","provBanco","provCorreo","provObservaciones"].forEach(k => { const el=document.getElementById(k); if(el) el.value=p[k.replace("prov","").toLowerCase()]||""; });
+        document.getElementById("provNombre").value = p.nombre||"";
+        document.getElementById("provContacto").value = p.contacto||"";
+        document.getElementById("provTelefono").value = p.telefono||"";
+        document.getElementById("provDireccion").value = p.direccion||"";
+        document.getElementById("provMunicipio").value = p.municipio||"";
+        document.getElementById("provBanco").value = p.banco||"";
+        document.getElementById("provCorreo").value = p.correo||"";
+        document.getElementById("provObservaciones").value = p.observaciones||"";
+        document.getElementById("provFavorito").checked = p.favorito===true;
+        document.getElementById("btnEliminarProveedor").classList.remove("oculto");
+    } else {
+        editandoProveedorId = null;
+        document.getElementById("modalProveedorTitulo").innerText = "🤝 Nuevo Proveedor";
+        ["provNombre","provContacto","provTelefono","provDireccion","provMunicipio","provBanco","provCorreo","provObservaciones"].forEach(k => { const el=document.getElementById(k); if(el) el.value=""; });
+        document.getElementById("provFavorito").checked = false;
+        document.getElementById("btnEliminarProveedor").classList.add("oculto");
+    }
+    document.getElementById("modalProveedor").classList.remove("oculto");
+}
+
+function cerrarModalProveedor() { document.getElementById("modalProveedor").classList.add("oculto"); editandoProveedorId = null; }
+
+document.getElementById("btnGuardarProveedor").addEventListener("click", () => {
+    const nombre = document.getElementById("provNombre").value.trim();
+    if (!nombre) { alert("⚠️ El nombre es obligatorio."); return; }
+    const datos = {
+        nombre, contacto: document.getElementById("provContacto").value.trim(),
+        telefono: document.getElementById("provTelefono").value.trim(),
+        direccion: document.getElementById("provDireccion").value.trim(),
+        municipio: document.getElementById("provMunicipio").value.trim(),
+        banco: document.getElementById("provBanco").value.trim(),
+        correo: document.getElementById("provCorreo").value.trim(),
+        favorito: document.getElementById("provFavorito").checked,
+        observaciones: document.getElementById("provObservaciones").value.trim()
+    };
+    if (editandoProveedorId) {
+        DB.actualizarProveedor(editandoProveedorId, datos);
+        mostrarToast("✅ Proveedor actualizado");
+        if (proveedorActualId === editandoProveedorId) actualizarPerfilProveedor();
+    } else {
+        DB.agregarProveedor(datos);
+        mostrarToast("✅ Proveedor registrado");
+    }
+    cerrarModalProveedor(); mostrarProveedores();
+});
+
+function eliminarProveedorActual() {
+    if (!editandoProveedorId) return;
+    const p = DB.buscarProveedor(editandoProveedorId);
+    if (!confirm(`¿Eliminar a ${p.nombre}?`)) return;
+    DB.productos.filter(pr => pr.proveedor === p.nombre).forEach(pr => DB.actualizarProducto(pr.id, { proveedor: "" }));
+    DB.eliminarProveedor(editandoProveedorId);
+    cerrarModalProveedor(); mostrarToast("✅ Proveedor eliminado"); volverProveedores();
+}
+
+function llamarProveedor() { const p=DB.buscarProveedor(proveedorActualId); if(p&&p.telefono) window.open("tel:"+p.telefono); }
+function whatsAppProveedor() { const p=DB.buscarProveedor(proveedorActualId); if(p&&p.telefono) window.open("https://wa.me/53"+p.telefono.replace(/\D/g,"")); }
+
+function abrirSheetProveedores() {
+    document.getElementById("sheetBuscadorProveedores").value = "";
+    renderSheetListaProveedores();
+    document.getElementById("sheetProveedores").classList.remove("oculto");
+    setTimeout(() => document.getElementById("sheetBuscadorProveedores").focus(), 300);
+}
+function cerrarSheetProveedores() { document.getElementById("sheetProveedores").classList.add("oculto"); }
+function cerrarSheetProveedoresSiOverlay(e) { if(e.target===document.getElementById("sheetProveedores")) cerrarSheetProveedores(); }
+
+function renderSheetListaProveedores() {
+    const texto = document.getElementById("sheetBuscadorProveedores").value.toLowerCase();
+    const lista = document.getElementById("sheetListaProveedores");
+    let provs = [...DB.proveedores].sort((a,b)=>(b.favorito?1:0)-(a.favorito?1:0));
+    if (texto) provs = provs.filter(p=>p.nombre.toLowerCase().includes(texto));
+    if (provs.length===0) { lista.innerHTML=`<p style="text-align:center;padding:20px;color:var(--text2);">No hay proveedores. Crea uno primero.</p>`; return; }
+    lista.innerHTML = provs.map(p=>`
+        <div class="sheet-item" onclick="seleccionarProveedor('${p.id}')">
+            <div class="si-icono">🤝</div>
+            <div class="si-info"><h4>${p.favorito?"⭐ ":""}${p.nombre}</h4><p>${p.contacto||p.municipio||"—"}</p></div>
+            <div class="si-stock"><strong>${p.telefono||""}</strong></div>
+        </div>`).join("");
+}
+
+function seleccionarProveedor(id) {
+    const p = DB.buscarProveedor(id); if (!p) return;
+    const el = document.getElementById("proveedor"); if (el) el.value = p.nombre;
+    const tpEl = document.getElementById("textoProveedorSel");
+    if (tpEl) { tpEl.className="texto-prod-seleccionado"; tpEl.innerText=`🤝 ${p.nombre}`; }
+    cerrarSheetProveedores();
+}
+
+function toggleMenuOpcionesProveedores() { document.getElementById("menuOpcionesProveedores").classList.toggle("oculto"); }
+
+function exportarProveedoresExcel() {
+    document.getElementById("menuOpcionesProveedores").classList.add("oculto");
+    const datos = DB.proveedores.map(p=>({ Nombre:p.nombre, Contacto:p.contacto||"", Teléfono:p.telefono||"", Dirección:p.direccion||"", Municipio:p.municipio||"", Favorito:p.favorito?"Sí":"No" }));
+    const ws = XLSX.utils.json_to_sheet(datos);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Proveedores");
+    XLSX.writeFile(wb, "proveedores-arb.xlsx");
+}
+
+function exportarProveedoresPDF() {
+    document.getElementById("menuOpcionesProveedores").classList.add("oculto");
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    doc.setFontSize(16); doc.text("INVENTARY ARB — Proveedores", 14, 15);
+    doc.setFontSize(10); doc.text("Generado: "+new Date().toLocaleDateString("es-CU"), 14, 22);
+    doc.autoTable({ startY:28, head:[["Nombre","Contacto","Teléfono","Municipio"]],
+        body: DB.proveedores.map(p=>[p.nombre, p.contacto||"—", p.telefono||"—", p.municipio||"—"]),
+        styles:{fontSize:9}, headStyles:{fillColor:[0,188,188]} });
+    doc.save("proveedores-arb.pdf");
 }
