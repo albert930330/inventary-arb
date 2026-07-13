@@ -19,22 +19,44 @@
       <h1>INVENTARY ARB</h1>
       <p>Control Total + ONAT</p>
     </div>
-    <div class="header-avatar">🏪</div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn-tool" onclick="abrirBusquedaGlobal()" style="font-size:18px;">🔍</button>
+      <div class="header-avatar" id="headerEmoji">🏪</div>
+    </div>
   </div>
+
+  <!-- Saludo -->
   <div class="saludo">
-    <p>Bienvenido,</p>
-    <h2 id="nombreNegocio">Mi Negocio 👋</h2>
+    <p id="saludoHora">Buenos días</p>
+    <h2 id="nombreNegocio">Mi Negocio</h2>
   </div>
+
+  <!-- Hero card unificada con salud del negocio -->
   <div class="hero-card">
-    <div class="hero-label">💰 Capital Invertido</div>
-    <div class="hero-amount"><span id="heroCapital">0</span> <small>CUP</small></div>
-    <div class="hero-sub">Valor de venta: <strong id="heroVenta">0</strong> CUP</div>
-    <div class="hero-badges">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+      <div>
+        <div class="hero-label">💰 Capital Invertido</div>
+        <div class="hero-amount"><span id="heroCapital">0</span> <small>CUP</small></div>
+        <div class="hero-sub">Valor de venta: <strong id="heroVenta">0</strong> CUP</div>
+      </div>
+      <div class="hero-salud">
+        <div class="hero-salud-pct" id="saludPuntaje">100%</div>
+        <div class="hero-salud-estado" id="saludEstado">Excelente</div>
+      </div>
+    </div>
+    <div class="hero-badges" style="margin-top:12px;">
       <div class="badge badge-green">📦 <span id="heroTotal">0</span> productos</div>
       <div class="badge badge-gold">📈 <span id="heroMargen">0</span>% margen</div>
       <div class="badge badge-red" id="heroAlerta" style="display:none">⚠️ <span id="heroStockBajo">0</span> bajos</div>
     </div>
   </div>
+
+  <!-- Panel Inteligente (sin título, máx 4 alertas) -->
+  <div id="panelInteligente" style="padding:0 20px 4px; display:flex; flex-direction:column; gap:8px;"></div>
+  <div id="btnVerTodasAlertas" class="oculto" style="padding:2px 20px 8px;">
+    <button onclick="verTodasLasAlertas()" style="width:100%;padding:11px;background:none;border:1px solid var(--border);border-radius:12px;color:var(--accent);font-size:13px;font-weight:600;cursor:pointer;">Ver todas las alertas →</button>
+  </div>
+  <!-- Mini stats -->
   <div class="mini-stats">
     <div class="mini-card">
       <span class="mini-icon">📦</span>
@@ -52,6 +74,8 @@
       <div class="mini-label">Stock bajo</div>
     </div>
   </div>
+
+  <!-- Módulos -->
   <div class="section-title"><h3>Módulos</h3></div>
   <div class="menu-grid">
     <div class="menu-btn destacado" onclick="abrirInventario()">
@@ -83,10 +107,27 @@
       <div class="menu-text"><h4>ONAT <span class="chip-nuevo">TCP</span></h4><p id="menuResumenONAT">Centro fiscal</p></div>
     </div>
   </div>
+
+  <!-- Alertas inteligentes de reposición (ya existentes) -->
   <div id="alertasInteligentes" style="display:none; padding:0 20px 4px;"></div>
+
+  <!-- Recientes -->
   <div class="section-title" id="seccionRecientes" style="display:none"><h3>Recientes</h3></div>
   <div class="productos-lista" id="productosRecientes"></div>
   <div class="spacer"></div>
+</div>
+
+<!-- PANTALLA: BÚSQUEDA GLOBAL -->
+<div id="pantallaBusquedaGlobal" class="pantalla">
+  <div class="header" style="padding-bottom:8px;">
+    <button class="btn-back" onclick="volverInicio()">‹</button>
+    <div style="flex:1;padding:0 8px;">
+      <input type="text" id="inputBusquedaGlobal" placeholder="Buscar productos, clientes, proveedores..."
+        oninput="ejecutarBusquedaGlobal()"
+        style="width:100%;padding:10px 14px;border-radius:12px;border:1.5px solid var(--accent);background:var(--surface);color:var(--text);font-size:15px;box-sizing:border-box;">
+    </div>
+  </div>
+  <div id="resultadosBusquedaGlobal" style="padding:8px 20px 100px;"></div>
 </div>
 
 <!-- PANTALLA: INVENTARIO -->

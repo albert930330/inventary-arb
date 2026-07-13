@@ -1408,3 +1408,113 @@ textarea { height: 80px; resize: none; }
   font-family: 'Syne', Arial, sans-serif;
 }
 #btnGuardarProveedor:active { transform: scale(0.98); }
+
+
+/* ══════════════════════════════════════════════════
+   INICIO EVOLUCIONADO — Panel Inteligente + Salud
+   ══════════════════════════════════════════════════ */
+
+/* Salud del negocio */
+.salud-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px 18px;
+}
+.salud-info { display: flex; flex-direction: column; gap: 3px; }
+.salud-label {
+  font-size: 11px;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.salud-estado {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+.salud-score {
+  font-family: 'Syne', Arial, sans-serif;
+  font-size: 32px;
+  font-weight: 800;
+  color: var(--accent);
+  line-height: 1;
+}
+.salud-score small {
+  font-size: 14px;
+  color: var(--text2);
+  font-weight: 400;
+}
+
+/* Acciones rápidas */
+.acciones-rapidas {
+  display: flex;
+  gap: 8px;
+  padding: 0 20px 4px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.acciones-rapidas::-webkit-scrollbar { display: none; }
+.accion-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 12px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  cursor: pointer;
+  transition: 0.15s;
+  flex-shrink: 0;
+  min-width: 64px;
+}
+.accion-btn span { font-size: 22px; }
+.accion-btn small {
+  font-size: 11px;
+  color: var(--text2);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.accion-btn:active {
+  transform: scale(0.94);
+  background: var(--surface2);
+  border-color: rgba(0,232,150,0.3);
+}
+
+/* Buscador en header */
+#buscarCliente {
+  width: 100%;
+  padding: 12px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 15px;
+  box-sizing: border-box;
+}
+
+/* Hero + Salud unificados */
+.hero-salud {
+  text-align: right;
+  flex-shrink: 0;
+}
+.hero-salud-pct {
+  font-family: 'Syne', Arial, sans-serif;
+  font-size: 28px;
+  font-weight: 800;
+  color: var(--accent);
+  line-height: 1;
+}
+.hero-salud-estado {
+  font-size: 11px;
+  color: rgba(255,255,255,0.6);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-top: 3px;
+}
+

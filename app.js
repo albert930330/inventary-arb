@@ -410,6 +410,94 @@ function abrirReportes() {
     actualizarReporte();
 }
 
+function abrirBusquedaGlobal() {
+    mostrarPantalla("pantallaBusquedaGlobal");
+    document.getElementById("btnFlotante").classList.add("ocultar-boton");
+    document.getElementById("inputBusquedaGlobal").value = "";
+    document.getElementById("resultadosBusquedaGlobal").innerHTML = `<p style="text-align:center;color:var(--text2);padding:40px 0;">Escribe para buscar en toda la app...</p>`;
+    setTimeout(() => document.getElementById("inputBusquedaGlobal").focus(), 300);
+}
+
+function ejecutarBusquedaGlobal() {
+    const texto = document.getElementById("inputBusquedaGlobal").value.trim().toLowerCase();
+    const el = document.getElementById("resultadosBusquedaGlobal");
+    if (texto.length < 2) { el.innerHTML = `<p style="text-align:center;color:var(--text2);padding:40px 0;">Escribe al menos 2 caracteres...</p>`; return; }
+    const moneda = DB.configuracion.moneda || "CUP";
+    let html = "";
+
+    // Productos
+    const prods = DB.productos.filter(p => p.nombre.toLowerCase().includes(texto) || (p.categoria||"").toLowerCase().includes(texto));
+    if (prods.length > 0) {
+        html += `<div class="cfg-grupo-label">📦 Productos (${prods.length})</div>`;
+        html += prods.slice(0,5).map(p => `
+            <div class="gas-card" onclick="abrirInventario()" style="margin-bottom:6px;">
+                <div class="gas-card-icono">${ICONOS[p.categoria]||"📦"}</div>
+                <div class="gas-card-info"><h4>${p.nombre}</h4><p>${p.cantidad} ${p.unidad||""} · ${p.almacen||"—"}</p></div>
+                <div class="gas-card-monto" style="color:var(--accent);">${(p.venta||0).toLocaleString("es-CU")} ${moneda}</div>
+            </div>`).join("");
+    }
+
+    // Clientes
+    const clis = DB.clientes.filter(c => c.nombre.toLowerCase().includes(texto) || (c.telefono||"").includes(texto));
+    if (clis.length > 0) {
+        html += `<div class="cfg-grupo-label">👥 Clientes (${clis.length})</div>`;
+        html += clis.slice(0,3).map(c => {
+            const saldo = DB.saldoCliente(c.id);
+            return `<div class="gas-card" onclick="abrirPerfilCliente('${c.id}')" style="margin-bottom:6px;">
+                <div class="gas-card-icono" style="background:rgba(245,197,66,0.1);">👤</div>
+                <div class="gas-card-info"><h4>${c.nombre}</h4><p>${c.telefono||"Sin teléfono"}</p></div>
+                <div class="gas-card-monto">${saldo > 0 ? saldo.toLocaleString("es-CU")+" "+moneda : "Al día"}</div>
+            </div>`;
+        }).join("");
+    }
+
+    // Proveedores
+    const provs = DB.proveedores.filter(p => p.nombre.toLowerCase().includes(texto) || (p.contacto||"").toLowerCase().includes(texto));
+    if (provs.length > 0) {
+        html += `<div class="cfg-grupo-label">🤝 Proveedores (${provs.length})</div>`;
+        html += provs.slice(0,3).map(p => `
+            <div class="gas-card" onclick="abrirPerfilProveedor('${p.id}')" style="margin-bottom:6px;">
+                <div class="gas-card-icono" style="background:rgba(0,188,188,0.1);">🤝</div>
+                <div class="gas-card-info"><h4>${p.nombre}</h4><p>${p.contacto||p.municipio||"—"}</p></div>
+                <span style="color:var(--text3);font-size:20px;">›</span>
+            </div>`).join("");
+    }
+
+    // Gastos
+    const gastos = DB.gastos.filter(g => g.concepto.toLowerCase().includes(texto));
+    if (gastos.length > 0) {
+        html += `<div class="cfg-grupo-label">🧾 Gastos (${gastos.length})</div>`;
+        html += gastos.slice(0,3).map(g => {
+            const cat = CATEGORIAS_GASTO[g.categoria]||{icono:"🧾"};
+            return `<div class="gas-card" onclick="abrirGastos()" style="margin-bottom:6px;">
+                <div class="gas-card-icono" style="background:rgba(255,107,74,0.1);">${cat.icono}</div>
+                <div class="gas-card-info"><h4>${g.concepto}</h4><p>${new Date(g.fecha).toLocaleDateString("es-CU")}</p></div>
+                <div class="gas-card-monto">${(g.monto||0).toLocaleString("es-CU")} ${moneda}</div>
+            </div>`;
+        }).join("");
+    }
+
+    // Movimientos
+    const movs = DB.movimientos.filter(m => {
+        const p = DB.buscarProducto(m.productoId);
+        return (p && p.nombre.toLowerCase().includes(texto)) || (m.nota||"").toLowerCase().includes(texto) || (m.cliente||"").toLowerCase().includes(texto);
+    });
+    if (movs.length > 0) {
+        html += `<div class="cfg-grupo-label">📋 Movimientos (${movs.length})</div>`;
+        html += movs.slice(0,3).map(m => {
+            const p = DB.buscarProducto(m.productoId);
+            return `<div class="gas-card" onclick="abrirHistorial()" style="margin-bottom:6px;">
+                <div class="gas-card-icono">${m.tipo==="entrada"?"📥":"📤"}</div>
+                <div class="gas-card-info"><h4>${p?p.nombre:"Producto"}</h4><p>${new Date(m.fecha).toLocaleDateString("es-CU")} · ${m.tipo}</p></div>
+                <div class="gas-card-monto" style="color:${m.tipo==="entrada"?"var(--accent)":"var(--warn)"};">${m.tipo==="entrada"?"+":"-"}${m.cantidad} uds</div>
+            </div>`;
+        }).join("");
+    }
+
+    if (!html) html = `<p style="text-align:center;color:var(--text2);padding:40px 0;">Sin resultados para "${texto}"</p>`;
+    el.innerHTML = html;
+}
+
 function abrirProveedores() {
     mostrarPantalla("pantallaProveedores");
     document.getElementById("btnFlotante").classList.add("ocultar-boton");
@@ -550,6 +638,9 @@ function cerrarEscaner() {
 function actualizarInicio() {
     const est = DB.estadisticas();
     const cfg = DB.configuracion;
+    const moneda = cfg.moneda || "CUP";
+
+    // Hero card (se mantiene)
     document.getElementById("heroCapital").innerText = est.capital.toLocaleString("es-CU");
     document.getElementById("heroVenta").innerText = est.valorVenta.toLocaleString("es-CU");
     document.getElementById("heroTotal").innerText = DB.productos.length;
@@ -560,15 +651,153 @@ function actualizarInicio() {
     document.getElementById("menuTotalProductos").innerText = DB.productos.length + " productos";
     const menuAlm = document.getElementById("menuTotalAlmacenes");
     if (menuAlm) menuAlm.innerText = DB.almacenes.length + " almacén" + (DB.almacenes.length !== 1 ? "es" : "");
+
+    // Saludo dinámico según hora
+    const hora = new Date().getHours();
+    const saludoTxt = hora < 12 ? "Buenos días," : hora < 18 ? "Buenas tardes," : "Buenas noches,";
+    document.getElementById("saludoHora").innerText = saludoTxt;
     document.getElementById("nombreNegocio").innerText = (cfg.nombreNegocio || "Mi Negocio") + " 👋";
-    document.querySelector(".header-avatar").innerText = cfg.emoji || "🏪";
+    const avatarEl = document.getElementById("headerEmoji");
+    if (avatarEl) avatarEl.innerText = cfg.emoji || "🏪";
 
     const alertaEl = document.getElementById("heroAlerta");
-    if (est.stockBajo > 0) {
-        alertaEl.style.display = "flex";
-        document.getElementById("heroStockBajo").innerText = est.stockBajo;
-    } else { alertaEl.style.display = "none"; }
+    if (est.stockBajo > 0) { alertaEl.style.display = "flex"; document.getElementById("heroStockBajo").innerText = est.stockBajo; }
+    else alertaEl.style.display = "none";
 
+    // ── Puntuación de salud del negocio ──
+    let puntaje = 0;
+    const ahora = new Date();
+    const mes = ahora.getMonth(); const anio = ahora.getFullYear();
+
+    // +20 si no hay tributos vencidos
+    const tributos = calcularTributos(ingresosDelMes(mes, anio), gastosDelMes(mes, anio), mes, anio);
+    const pagos = cfg.onatPagos || {};
+    const vencidos = Object.values(tributos).filter(t => {
+        if (!t.esAplicable || t.importe === 0) return false;
+        const clave = `${anio}-${mes}-${t.codigo}`;
+        const lim = new Date(anio, mes, t.diaLimite, 23, 59, 59);
+        return ahora > lim && !pagos[clave];
+    });
+    if (vencidos.length === 0) puntaje += 20;
+
+    // +20 si no hay stock crítico (en cero)
+    const sinStock = DB.productos.filter(p => p.cantidad === 0).length;
+    if (sinStock === 0) puntaje += 20;
+
+    // +20 si la ganancia del mes es positiva
+    const iniMes = new Date(anio, mes, 1), finMes = new Date(anio, mes+1, 0, 23, 59, 59);
+    const ventasMes = DB.movimientos.filter(m => m.tipo === "salida" && new Date(m.fecha) >= iniMes && new Date(m.fecha) <= finMes);
+    const gananciaMes = ventasMes.reduce((s, m) => s + ((m.precioUnitario||0) - (typeof m.costoReal==="number"?m.costoReal:0)) * (m.cantidad||0), 0);
+    if (gananciaMes > 0) puntaje += 20;
+
+    // +20 si no hay clientes morosos (rojo)
+    const morosos = DB.clientes.filter(c => DB.nivelRiesgo(c.id) === "rojo").length;
+    if (morosos === 0) puntaje += 20;
+
+    // +20 si tiene respaldo reciente (configuración tiene nombreNegocio al menos)
+    if (cfg.nombreNegocio) puntaje += 20;
+
+    const estadoSalud = puntaje >= 80 ? "Excelente" : puntaje >= 60 ? "Bueno" : puntaje >= 40 ? "Regular" : "Necesita atención";
+    const colorSalud = puntaje >= 80 ? "var(--accent)" : puntaje >= 60 ? "var(--gold)" : puntaje >= 40 ? "#f97316" : "var(--warn)";
+    document.getElementById("saludPuntaje").innerText = puntaje + "%";
+    document.getElementById("saludPuntaje").style.color = colorSalud;
+    document.getElementById("saludEstado").innerText = estadoSalud;
+    document.getElementById("saludEstado").style.color = colorSalud;
+
+    // ── Panel Inteligente con prioridades ──
+    const alertas = [];
+
+    // 🔴 CRÍTICAS
+    if (vencidos.length > 0)
+        alertas.push({ nivel: "rojo", icono: "🏛️", modulo: "ONAT", msg: `${vencidos.length} tributo${vencidos.length>1?"s":""} vencido${vencidos.length>1?"s":""} — Paga urgente`, accionNombre: "abrirONAT" });
+
+    const sinStockProds = DB.productos.filter(p => p.cantidad === 0);
+    if (sinStockProds.length > 0)
+        alertas.push({ nivel: "rojo", icono: "📦", modulo: "Inventario", msg: `${sinStockProds.length} producto${sinStockProds.length>1?"s":""} sin stock (agotado${sinStockProds.length>1?"s":""})`, accionNombre: "abrirInventario" });
+
+    // 🟠 IMPORTANTES
+    if (est.stockBajo > 0)
+        alertas.push({ nivel: "naranja", icono: "⚠️", modulo: "Inventario", msg: `${est.stockBajo} producto${est.stockBajo>1?"s":""} con stock bajo`, accionNombre: "abrirInventario" });
+
+    // Próximos vencimientos ONAT (≤5 días) — agrupados por días restantes
+    const proxONATGrupos = {};
+    Object.values(tributos).filter(t => {
+        if (!t.esAplicable || t.importe === 0) return false;
+        const clave = `${anio}-${mes}-${t.codigo}`;
+        if (pagos[clave]) return false;
+        const lim = new Date(anio, mes, t.diaLimite);
+        const dias = Math.ceil((lim - ahora) / (1000*60*60*24));
+        return dias >= 0 && dias <= 5;
+    }).forEach(t => {
+        const dias = Math.ceil((new Date(anio, mes, t.diaLimite) - ahora) / (1000*60*60*24));
+        const key = dias;
+        if (!proxONATGrupos[key]) proxONATGrupos[key] = { dias, codigos: [] };
+        proxONATGrupos[key].codigos.push(t.codigo);
+    });
+    Object.values(proxONATGrupos).forEach(g => {
+        const txt = g.codigos.length === 1
+            ? `${g.codigos[0]} vence en ${g.dias} día${g.dias!==1?"s":""}`
+            : `${g.codigos.length} tributos vencen en ${g.dias} día${g.dias!==1?"s":""}`;
+        alertas.push({ nivel: "naranja", icono: "🏛️", modulo: "ONAT", msg: txt, accionNombre: "abrirONAT" });
+    });
+
+    if (morosos > 0)
+        alertas.push({ nivel: "naranja", icono: "👥", modulo: "Clientes", msg: `${morosos} cliente${morosos>1?"s":""} con deuda vencida`, accionNombre: "abrirClientes" });
+
+    // 🔵 INFORMATIVAS
+    if (gananciaMes > 0)
+        alertas.push({ nivel: "azul", icono: "📈", modulo: "Reportes", msg: `Ganancia neta del mes: ${gananciaMes.toLocaleString("es-CU")} ${moneda}`, accionNombre: "abrirReportes" });
+
+    // Proveedores sin comprar hace más de 30 días
+    const hace30 = new Date(); hace30.setDate(ahora.getDate() - 30);
+    DB.proveedores.filter(p => p.favorito).forEach(p => {
+        const ultCompra = DB.comprasProveedor(p.nombre).sort((a,b) => new Date(b.fecha)-new Date(a.fecha))[0];
+        if (!ultCompra || new Date(ultCompra.fecha) < hace30) {
+            const dias = ultCompra ? Math.floor((ahora-new Date(ultCompra.fecha))/(1000*60*60*24)) : null;
+            alertas.push({ nivel: "azul", icono: "🤝", modulo: "Proveedores", msg: `No compras a ${p.nombre} desde hace ${dias||"+"} días`, accionNombre: "abrirProveedores" });
+        }
+    });
+
+    // Tendencia de precios (productos con aumento >5% en última compra)
+    DB.productos.forEach(p => {
+        const compras = DB.movimientos.filter(m => m.tipo==="entrada" && m.productoId===p.id).sort((a,b)=>new Date(b.fecha)-new Date(a.fecha));
+        if (compras.length >= 2) {
+            const ult = compras[0].precioUnitario || 0;
+            const ant = compras[1].precioUnitario || 0;
+            if (ant > 0) {
+                const pct = Math.round(((ult-ant)/ant)*100);
+                if (pct >= 5)
+                    alertas.push({ nivel: "azul", icono: "💹", modulo: "Inventario", msg: `${p.nombre} subió ${pct}% respecto a la última compra`, accionNombre: "abrirInventario" });
+            }
+        }
+    });
+
+    const panelEl = document.getElementById("panelInteligente");
+    const btnVerTodas = document.getElementById("btnVerTodasAlertas");
+    if (alertas.length === 0) {
+        panelEl.innerHTML = `<div class="alerta-item" style="border-color:rgba(0,232,150,0.2);">
+            <span>✅</span><div class="alerta-info"><strong>Todo en orden</strong><span>No hay alertas pendientes</span></div></div>`;
+        if (btnVerTodas) btnVerTodas.classList.add("oculto");
+    } else {
+        const orden = { rojo: 0, naranja: 1, azul: 2 };
+        alertas.sort((a,b) => orden[a.nivel]-orden[b.nivel]);
+        // Máximo 4 alertas visibles
+        const visibles = alertas.slice(0, 4);
+        panelEl.innerHTML = visibles.map(a => {
+            const color = a.nivel==="rojo" ? "rgba(255,107,74,0.15)" : a.nivel==="naranja" ? "rgba(245,197,66,0.15)" : "rgba(99,179,237,0.1)";
+            const borde = a.nivel==="rojo" ? "rgba(255,107,74,0.3)" : a.nivel==="naranja" ? "rgba(245,197,66,0.3)" : "rgba(99,179,237,0.2)";
+            const colorIcono = a.nivel==="rojo" ? "var(--warn)" : a.nivel==="naranja" ? "var(--gold)" : "#63b3ed";
+            return `<div class="alerta-item" style="background:${color};border-color:${borde};" onclick="${a.accionNombre}()">
+                <div style="width:36px;height:36px;border-radius:10px;background:${color};border:1.5px solid ${borde};display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:18px;">${a.icono}</div>
+                <div class="alerta-info"><strong style="color:${colorIcono};">${a.modulo}</strong><span>${a.msg}</span></div>
+                <span class="alerta-arrow">›</span>
+            </div>`;
+        }).join("");
+        // Botón "Ver todas" solo si hay más de 4
+        if (btnVerTodas) btnVerTodas.classList.toggle("oculto", alertas.length <= 4);
+    }
+
+    // Recientes
     const recientes = [...DB.productos].slice(-3).reverse();
     const seccion = document.getElementById("seccionRecientes");
     const lista = document.getElementById("productosRecientes");
@@ -582,14 +811,24 @@ function actualizarInicio() {
                     <p>${p.categoria || "—"} · ${p.almacen || "—"}</p>
                 </div>
                 <div class="prod-price">
-                    <strong>${(p.venta||0).toLocaleString("es-CU")} ${cfg.moneda||"CUP"}</strong>
+                    <strong>${(p.venta||0).toLocaleString("es-CU")} ${moneda}</strong>
                     <span>${p.cantidad || 0} ${p.unidad || ""}</span>
                 </div>
             </div>`).join("");
     } else { seccion.style.display = "none"; lista.innerHTML = ""; }
 
-    // Alertas inteligentes de reposición
     alertasInteligentes();
+}
+
+function verTodasLasAlertas() {
+    // Muestra todas las alertas expandiendo el panel
+    const btnVerTodas = document.getElementById("btnVerTodasAlertas");
+    if (btnVerTodas) btnVerTodas.classList.add("oculto");
+    // Re-render sin límite de 4
+    actualizarInicio();
+    const panelEl = document.getElementById("panelInteligente");
+    // Override: show all (actualizarInicio already computed all alerts, we just need to expand)
+    panelEl.querySelectorAll(".alerta-item").forEach(el => el.style.display = "flex");
 }
 
 function alertasInteligentes() {
