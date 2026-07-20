@@ -1518,3 +1518,183 @@ textarea { height: 80px; resize: none; }
   margin-top: 3px;
 }
 
+/* ══════════════════════════════════════════════════
+   MÓDULO CAJA POS
+   ══════════════════════════════════════════════════ */
+
+/* Barra de total siempre visible */
+.pos-total-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: linear-gradient(135deg, rgba(0,232,150,0.15), rgba(0,232,150,0.05));
+  border-bottom: 1px solid rgba(0,232,150,0.2);
+  padding: 12px 20px;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.pos-total-label {
+  font-size: 11px;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  display: block;
+  margin-bottom: 2px;
+}
+.pos-total-amount {
+  font-family: 'Syne', Arial, sans-serif;
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--accent);
+}
+.pos-total-meta {
+  text-align: right;
+  font-size: 12px;
+  color: var(--text2);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Item del carrito */
+.pos-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+.pos-item-info { flex: 1; min-width: 0; }
+.pos-item-nombre {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+.pos-item-precio { font-size: 12px; color: var(--text2); }
+
+/* Controles de cantidad */
+.pos-item-controles {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.pos-qty-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: 0.12s;
+}
+.pos-qty-btn:active { background: var(--accent); color: #0a0f0d; }
+.pos-qty {
+  font-family: 'Syne', Arial, sans-serif;
+  font-size: 16px;
+  font-weight: 700;
+  min-width: 24px;
+  text-align: center;
+  color: var(--text);
+}
+
+/* Subtotal y acciones del item */
+.pos-item-subtotal {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.pos-item-subtotal strong {
+  font-family: 'Syne', Arial, sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent);
+}
+.pos-desc-btn {
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: rgba(245,197,66,0.1);
+  color: var(--gold);
+  cursor: pointer;
+}
+.pos-del-btn {
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,107,74,0.2);
+  background: rgba(255,107,74,0.08);
+  color: var(--warn);
+  cursor: pointer;
+}
+
+/* Métodos de pago */
+.pos-metodos {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-width: none;
+}
+.pos-metodos::-webkit-scrollbar { display: none; }
+.pos-metodo {
+  padding: 8px 14px;
+  border-radius: 20px;
+  border: 1.5px solid var(--border);
+  background: var(--surface);
+  color: var(--text2);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: 0.15s;
+  flex-shrink: 0;
+}
+.pos-metodo.activo {
+  border-color: var(--accent);
+  background: rgba(0,232,150,0.12);
+  color: var(--accent);
+}
+
+/* Cambio */
+.pos-cambio-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 6px 12px;
+  min-width: 70px;
+}
+
+/* Botón cobrar */
+#btnCobrarPOS {
+  width: 100%;
+  padding: 18px;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: #0a0f0d;
+  border: none;
+  border-radius: 16px;
+  font-size: 18px;
+  font-weight: 800;
+  font-family: 'Syne', Arial, sans-serif;
+  cursor: pointer;
+  transition: 0.2s;
+  box-shadow: 0 6px 20px rgba(0,232,150,0.3);
+}
+#btnCobrarPOS:active { transform: scale(0.97); }
+

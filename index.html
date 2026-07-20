@@ -82,6 +82,10 @@
       <div class="menu-icon icon-green">📦</div>
       <div class="menu-text"><h4>Inventario</h4><p id="menuTotalProductos">0 productos</p></div>
     </div>
+    <div class="menu-btn destacado" onclick="abrirCajaPOS()" style="background:linear-gradient(135deg,rgba(99,179,237,0.15),rgba(99,179,237,0.05));border-color:rgba(99,179,237,0.3);">
+      <div class="menu-icon" style="background:rgba(99,179,237,0.2);color:#63b3ed;">🛒</div>
+      <div class="menu-text"><h4>Caja POS</h4><p id="menuResumenPOS">Venta rápida</p></div>
+    </div>
     <div class="menu-btn" onclick="abrirAlmacenes()">
       <div class="menu-icon icon-blue">🏪</div>
       <div class="menu-text"><h4>Almacenes</h4><p id="menuTotalAlmacenes">0 almacenes</p></div>
@@ -604,6 +608,142 @@
   <textarea id="transfNota" placeholder="Observaciones..."></textarea>
   <button id="btnConfirmarTransferencia">🔄 Transferir</button>
 </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!-- PANTALLA: CAJA POS                              -->
+<!-- ═══════════════════════════════════════════════ -->
+<div id="pantallaCajaPOS" class="pantalla">
+  <div class="header">
+    <button class="btn-back" onclick="volverInicio()">‹</button>
+    <div class="header-left"><h1>🛒 Caja POS</h1><p id="posSubtitulo">Nueva venta</p></div>
+    <button class="btn-tool" onclick="abrirCierreCaja()">🔒 Cierre</button>
+  </div>
+
+  <!-- Total siempre visible -->
+  <div class="pos-total-bar">
+    <div class="pos-total-info">
+      <span class="pos-total-label">TOTAL</span>
+      <span class="pos-total-amount" id="posTotalAmount">0 CUP</span>
+    </div>
+    <div class="pos-total-meta">
+      <span id="posItemCount">0 productos</span>
+      <span id="posDescuentoGlobal" class="oculto" style="color:var(--warn);">Desc. global: <span id="posDescuentoGlobalVal">0</span>%</span>
+    </div>
+  </div>
+
+  <!-- Carrito -->
+  <div id="posCarrito" style="padding:0 16px; display:flex; flex-direction:column; gap:8px; min-height:60px;"></div>
+
+  <!-- Botón agregar producto -->
+  <div style="padding:10px 16px 6px;">
+    <button class="alm-btn-transferir" onclick="abrirSheetProductosPOS()">＋ Agregar producto</button>
+  </div>
+
+  <!-- Descuento global -->
+  <div style="padding:0 16px 10px; display:flex; gap:8px; align-items:center;">
+    <span style="font-size:13px;color:var(--text2);flex-shrink:0;">Descuento global:</span>
+    <input type="number" id="posDescGlobal" placeholder="0" min="0" max="100"
+      oninput="recalcularTotal()"
+      style="width:70px;padding:8px;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text);font-size:14px;text-align:center;">
+    <span style="font-size:13px;color:var(--text2);">%</span>
+  </div>
+
+  <!-- Método de pago -->
+  <div style="padding:0 16px 8px;">
+    <div class="cfg-grupo-label" style="padding:0 0 6px;">MÉTODO DE PAGO</div>
+    <div class="pos-metodos">
+      <button class="pos-metodo activo" data-metodo="efectivo" onclick="seleccionarMetodoPOS(this)">💵 Efectivo</button>
+      <button class="pos-metodo" data-metodo="transfermovil" onclick="seleccionarMetodoPOS(this)">📱 Transfermóvil</button>
+      <button class="pos-metodo" data-metodo="enzona" onclick="seleccionarMetodoPOS(this)">💳 EnZona</button>
+      <button class="pos-metodo" data-metodo="fiado" onclick="seleccionarMetodoPOS(this)">📦 Fiado</button>
+      <button class="pos-metodo" data-metodo="mixto" onclick="seleccionarMetodoPOS(this)">🔀 Mixto</button>
+    </div>
+  </div>
+
+  <!-- Efectivo: monto recibido y cambio -->
+  <div id="posEfectivoBloque" style="padding:0 16px 8px;">
+    <div style="display:flex; gap:8px; align-items:center;">
+      <span style="font-size:13px;color:var(--text2);flex-shrink:0;">Recibido:</span>
+      <input type="number" id="posEfectivoRecibido" placeholder="0" min="0"
+        oninput="calcularCambio()"
+        style="flex:1;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text);font-size:16px;font-family:'Syne',Arial,sans-serif;">
+      <div class="pos-cambio-box">
+        <span style="font-size:11px;color:var(--text2);">CAMBIO</span>
+        <strong id="posCambio" style="font-family:'Syne',Arial,sans-serif;color:var(--text3);">—</strong>
+      </div>
+    </div>
+    <!-- Botones rápidos de monto -->
+    <div id="posMontosBotones" style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;"></div>
+  </div>
+
+  <!-- Pago mixto -->
+  <div id="posMixtoBloque" class="oculto" style="padding:0 16px 8px;">
+    <div style="display:flex; gap:8px; margin-bottom:6px;">
+      <div style="flex:1;">
+        <span style="font-size:11px;color:var(--text2);">Efectivo</span>
+        <input type="number" id="posMixtoEfectivo" placeholder="0" oninput="calcularMixto()"
+          style="width:100%;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text);font-size:15px;box-sizing:border-box;">
+      </div>
+      <div style="flex:1;">
+        <span style="font-size:11px;color:var(--text2);">Transferencia</span>
+        <input type="number" id="posMixtoTransferencia" placeholder="0" oninput="calcularMixto()"
+          style="width:100%;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text);font-size:15px;box-sizing:border-box;">
+      </div>
+    </div>
+    <div id="posMixtoRestante" style="font-size:13px;color:var(--text2);text-align:center;"></div>
+  </div>
+
+  <!-- Fiado: selector de cliente -->
+  <div id="posFiadoBloque" class="oculto" style="padding:0 16px 8px;">
+    <div class="campo-producto-sel" onclick="abrirSheetClientes()">
+      <span id="textoClientePOS" class="texto-prod-placeholder">Toca para seleccionar cliente...</span>
+      <span class="arrow-prod">›</span>
+    </div>
+    <input type="hidden" id="posClienteId">
+  </div>
+
+  <!-- Botón cobrar -->
+  <div style="padding:8px 16px 100px;">
+    <button id="btnCobrarPOS" onclick="procesarVentaPOS()">✅ Cobrar</button>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!-- PANTALLA: CIERRE DE CAJA                        -->
+<!-- ═══════════════════════════════════════════════ -->
+<div id="pantallaCierreCaja" class="pantalla">
+  <div class="header">
+    <button class="btn-back" onclick="volverCajaPOS()">‹</button>
+    <div class="header-left"><h1>📊 Cierre de Caja</h1><p id="cierreFecha">Hoy</p></div>
+    <button class="btn-tool" onclick="exportarCierrePDF()">📄</button>
+  </div>
+
+  <div class="cfg-grupo-label" style="padding-top:14px;">VENTAS DEL DÍA</div>
+  <div class="dashfin-cascada" style="margin:0 20px 14px;">
+    <div class="dashfin-row"><span>Total ventas</span><strong id="cierreTotalVentas">0 CUP</strong></div>
+    <div class="dashfin-row"><span>Ventas en efectivo</span><strong id="cierreEfectivo">0 CUP</strong></div>
+    <div class="dashfin-row"><span>Transfermóvil / EnZona</span><strong id="cierreTransferencia">0 CUP</strong></div>
+    <div class="dashfin-row"><span>Fiado (por cobrar)</span><strong id="cierreFiado" style="color:var(--warn);">0 CUP</strong></div>
+    <div class="dashfin-sep"></div>
+    <div class="dashfin-row dashfin-subtotal"><span>Transacciones</span><strong id="cierreTransacciones">0</strong></div>
+    <div class="dashfin-row dashfin-subtotal"><span>Unidades vendidas</span><strong id="cierreUnidades">0</strong></div>
+  </div>
+
+  <div class="cfg-grupo-label">GANANCIA REAL (FIFO)</div>
+  <div class="dashfin-cascada" style="margin:0 20px 14px;">
+    <div class="dashfin-row"><span>Ingresos</span><strong id="cierreIngresos">0 CUP</strong></div>
+    <div class="dashfin-row dashfin-resta"><span>− Costo real</span><strong id="cierreCosto">0 CUP</strong></div>
+    <div class="dashfin-sep"></div>
+    <div class="dashfin-row dashfin-total"><span>= Ganancia neta</span><strong id="cierreGanancia">0 CUP</strong></div>
+  </div>
+
+  <div class="cfg-grupo-label">PRODUCTOS MÁS VENDIDOS HOY</div>
+  <div id="cierreTopProductos" class="cfg-grupo" style="margin:0 20px 14px;"></div>
+
+  <div style="padding:0 20px 100px;">
+    <button class="alm-btn-transferir" onclick="compartirCierreWhatsApp()">📲 Compartir por WhatsApp</button>
+  </div>
 </div>
 
 <!-- ═══════════════════════════════════════════════ -->

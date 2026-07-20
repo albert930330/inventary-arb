@@ -273,6 +273,8 @@ let editandoClienteId = null;
 let tabClienteActual = "fiados";
 let vistaReporteActual = "dia";
 let onatTabActual = "panel";
+let posCarritoItems = []; // [{producto, cantidad, precioUnitario, descuento}]
+let posMetodoActual = "efectivo";
 let proveedorActualId = null;
 let editandoProveedorId = null;
 let tabProveedorActual = "estadisticas";
@@ -496,6 +498,39 @@ function ejecutarBusquedaGlobal() {
 
     if (!html) html = `<p style="text-align:center;color:var(--text2);padding:40px 0;">Sin resultados para "${texto}"</p>`;
     el.innerHTML = html;
+}
+
+function abrirCajaPOS() {
+    mostrarPantalla("pantallaCajaPOS");
+    document.getElementById("btnFlotante").classList.add("ocultar-boton");
+    posCarritoItems = [];
+    document.getElementById("posDescGlobal").value = "";
+    document.getElementById("posEfectivoRecibido").value = "";
+    document.getElementById("posClienteId").value = "";
+    document.getElementById("textoClientePOS").className = "texto-prod-placeholder";
+    document.getElementById("textoClientePOS").innerText = "Toca para seleccionar cliente...";
+    document.getElementById("posMixtoEfectivo").value = "";
+    document.getElementById("posMixtoTransferencia").value = "";
+    document.getElementById("posMixtoRestante").innerText = "";
+    const botonesEl = document.getElementById("posMontosBotones");
+    if (botonesEl) botonesEl.innerHTML = "";
+    // Restaurar último método de pago
+    const metodoDef = DB.configuracion.metodoPagoDefault || "efectivo";
+    const btnMetodo = document.querySelector(`.pos-metodo[data-metodo="${metodoDef}"]`);
+    if (btnMetodo) seleccionarMetodoPOS(btnMetodo);
+    else seleccionarMetodoPOS(document.querySelector('.pos-metodo[data-metodo="efectivo"]'));
+    renderCarrito(); // Inicializa estado vacío correctamente
+}
+
+function volverCajaPOS() {
+    mostrarPantalla("pantallaCajaPOS", "atras");
+    document.getElementById("btnFlotante").classList.add("ocultar-boton");
+}
+
+function abrirCierreCaja() {
+    mostrarPantalla("pantallaCierreCaja");
+    document.getElementById("btnFlotante").classList.add("ocultar-boton");
+    renderCierreCaja();
 }
 
 function abrirProveedores() {
@@ -1510,7 +1545,7 @@ function renderSheetLista() {
         const bajo = p.cantidad > 0 && p.cantidad <= p.stockMinimo;
         const sinStock = p.cantidad <= 0;
         return `
-        <div class="sheet-item ${sinStock ? 'stock-cero' : ''}" onclick="${sheetModo === 'transferencia' ? `seleccionarProductoTransferencia('${p.id}')` : `seleccionarProductoMov('${p.id}')`}">
+        <div class="sheet-item ${sinStock ? 'stock-cero' : ''}" onclick="${sheetModo === 'transferencia' ? `seleccionarProductoTransferencia('${p.id}')` : sheetModo === 'pos' ? `seleccionarProductoPOS('${p.id}')` : `seleccionarProductoMov('${p.id}')`}">
             <div class="si-icono">${ICONOS[p.categoria] || "📦"}</div>
             <div class="si-info"><h4>${p.nombre}</h4><p>${p.categoria || "Sin categoría"} · ${p.almacen || "—"}</p></div>
             <div class="si-stock">
@@ -3326,10 +3361,20 @@ function seleccionarClienteFiado(id) {
             mostrarToast(`⚠️ ${c.nombre} está cerca de su límite de crédito`);
         }
     }
-    document.getElementById("movClienteId").value = id;
-    const textoEl = document.getElementById("textoClienteSel");
-    textoEl.className = "texto-prod-seleccionado";
-    textoEl.innerText = `👤 ${c.nombre}`;
+    // Detectar si viene del POS o de Movimientos
+    const enPOS = !document.getElementById("pantallaCajaPOS").classList.contains("oculto") ||
+                  document.getElementById("pantallaCajaPOS").classList.contains("activa");
+    if (enPOS) {
+        document.getElementById("posClienteId").value = id;
+        const textoEl = document.getElementById("textoClientePOS");
+        textoEl.className = "texto-prod-seleccionado";
+        textoEl.innerText = `👤 ${c.nombre}`;
+    } else {
+        document.getElementById("movClienteId").value = id;
+        const textoEl = document.getElementById("textoClienteSel");
+        textoEl.className = "texto-prod-seleccionado";
+        textoEl.innerText = `👤 ${c.nombre}`;
+    }
     cerrarSheetClientes();
 }
 
@@ -4473,4 +4518,436 @@ function exportarProveedoresPDF() {
         body: DB.proveedores.map(p=>[p.nombre, p.contacto||"—", p.telefono||"—", p.municipio||"—"]),
         styles:{fontSize:9}, headStyles:{fillColor:[0,188,188]} });
     doc.save("proveedores-arb.pdf");
+}
+
+// ═══════════════════════════════════════════════
+// MÓDULO CAJA POS
+// ═══════════════════════════════════════════════
+
+function abrirSheetProductosPOS() {
+    sheetModo = "pos";
+    const filtrosEl = document.getElementById("sheetFiltros");
+    const ubicaciones = [...new Set(DB.productos.map(p => p.almacen).filter(Boolean))];
+    filtrosEl.innerHTML = `<button class="chip-filtro activo" data-filtro="" onclick="seleccionarFiltroSheet(this)">Todos</button>`;
+    ubicaciones.forEach(ub => { filtrosEl.innerHTML += `<button class="chip-filtro" data-filtro="${ub}" onclick="seleccionarFiltroSheet(this)">📍 ${ub}</button>`; });
+    sheetFiltroActivo = "";
+    document.getElementById("sheetBuscador").value = "";
+    renderSheetLista();
+    document.getElementById("sheetProductos").classList.remove("oculto");
+    setTimeout(() => document.getElementById("sheetBuscador").focus(), 300);
+}
+
+function seleccionarProductoPOS(id) {
+    const p = DB.buscarProducto(id);
+    if (!p) return;
+    if (p.cantidad <= 0 && !DB.configuracion.ventasSinStock) {
+        mostrarToast("⚠️ Sin stock disponible");
+        cerrarSheetProductos();
+        return;
+    }
+    // Si ya está en el carrito, suma 1
+    const existente = posCarritoItems.find(item => item.producto.id === id);
+    if (existente) {
+        existente.cantidad++;
+        existente.precioUnitario = calcularPrecioPOS(p, existente.cantidad);
+    } else {
+        posCarritoItems.push({
+            producto: p,
+            cantidad: 1,
+            precioUnitario: calcularPrecioPOS(p, 1),
+            descuento: 0
+        });
+    }
+    cerrarSheetProductos();
+    renderCarrito();
+    mostrarToast(`✅ ${p.nombre} agregado`);
+}
+
+function calcularPrecioPOS(producto, cantidad) {
+    // Aplica escala mayorista si existe
+    const escala = escalaAplicable(producto, cantidad);
+    return escala ? escala.precio : (producto.venta || 0);
+}
+
+function renderCarrito() {
+    const contenedor = document.getElementById("posCarrito");
+    const moneda = DB.configuracion.moneda || "CUP";
+
+    if (posCarritoItems.length === 0) {
+        contenedor.innerHTML = `<p id="posCarritoVacio" style="text-align:center;color:var(--text2);padding:20px 0;font-size:14px;">Agrega productos para comenzar</p>`;
+        document.getElementById("posTotalAmount").innerText = "0 " + moneda;
+        document.getElementById("posItemCount").innerText = "0 productos";
+        document.getElementById("posDescuentoGlobal").classList.add("oculto");
+        return;
+    }
+
+    const descGlobal = Number(document.getElementById("posDescGlobal").value) || 0;
+
+    contenedor.innerHTML = posCarritoItems.map((item, idx) => {
+        item.precioUnitario = calcularPrecioPOS(item.producto, item.cantidad);
+        const precioConDesc = item.precioUnitario * (1 - item.descuento / 100);
+        const subtotal = precioConDesc * item.cantidad;
+        const escala = escalaAplicable(item.producto, item.cantidad);
+
+        return `
+        <div class="pos-item">
+            <div class="pos-item-info">
+                <div class="pos-item-nombre">${item.producto.nombre}</div>
+                ${escala ? `<div style="font-size:10px;color:var(--accent);">🏷️ ${escala.nombre}</div>` : ""}
+                <div class="pos-item-precio">${item.precioUnitario.toLocaleString("es-CU")} ${moneda}/u${item.descuento > 0 ? ` <span style="color:var(--warn);">−${item.descuento}%</span>` : ""}</div>
+            </div>
+            <div class="pos-item-controles">
+                <button class="pos-qty-btn" onclick="cambiarCantidadPOS(${idx}, -1)">−</button>
+                <span class="pos-qty">${item.cantidad}</span>
+                <button class="pos-qty-btn" onclick="cambiarCantidadPOS(${idx}, 1)">+</button>
+            </div>
+            <div class="pos-item-subtotal">
+                <strong>${subtotal.toLocaleString("es-CU")} ${moneda}</strong>
+                <div style="display:flex;gap:4px;margin-top:4px;">
+                    <button class="pos-desc-btn" onclick="editarDescuentoItem(${idx})">% desc</button>
+                    <button class="pos-del-btn" onclick="eliminarItemPOS(${idx})">✕ quitar</button>
+                </div>
+            </div>
+        </div>`;
+    }).join("");
+
+    recalcularTotal();
+}
+
+function cambiarCantidadPOS(idx, delta) {
+    const item = posCarritoItems[idx];
+    if (!item) return;
+    const nueva = item.cantidad + delta;
+    if (nueva <= 0) { eliminarItemPOS(idx); return; }
+    if (nueva > item.producto.cantidad && !DB.configuracion.ventasSinStock) {
+        mostrarToast(`⚠️ Solo hay ${item.producto.cantidad} en stock`);
+        return;
+    }
+    item.cantidad = nueva;
+    item.precioUnitario = calcularPrecioPOS(item.producto, nueva);
+    renderCarrito();
+}
+
+function eliminarItemPOS(idx) {
+    posCarritoItems.splice(idx, 1);
+    renderCarrito();
+}
+
+function editarDescuentoItem(idx) {
+    const item = posCarritoItems[idx];
+    if (!item) return;
+    const desc = prompt(`Descuento para ${item.producto.nombre} (%):`, item.descuento || 0);
+    if (desc === null) return;
+    const num = Math.min(100, Math.max(0, Number(desc) || 0));
+    item.descuento = num;
+    renderCarrito();
+}
+
+function recalcularTotal() {
+    const moneda = DB.configuracion.moneda || "CUP";
+    const descGlobal = Math.min(100, Math.max(0, Number(document.getElementById("posDescGlobal").value) || 0));
+
+    let subtotal = 0;
+    posCarritoItems.forEach(item => {
+        const precioConDesc = item.precioUnitario * (1 - item.descuento / 100);
+        subtotal += precioConDesc * item.cantidad;
+    });
+
+    const total = subtotal * (1 - descGlobal / 100);
+    const totalUnidades = posCarritoItems.reduce((s, i) => s + i.cantidad, 0);
+
+    document.getElementById("posTotalAmount").innerText = total.toLocaleString("es-CU") + " " + moneda;
+    document.getElementById("posItemCount").innerText = totalUnidades + " producto" + (totalUnidades !== 1 ? "s" : "");
+
+    const descEl = document.getElementById("posDescuentoGlobal");
+    if (descGlobal > 0) {
+        descEl.classList.remove("oculto");
+        document.getElementById("posDescuentoGlobalVal").innerText = descGlobal;
+    } else {
+        descEl.classList.add("oculto");
+    }
+
+    calcularCambio();
+    calcularMixto();
+
+    // Actualizar botones de monto rápido si está en modo efectivo
+    if (posMetodoActual === "efectivo") {
+        const total = getTotalPOS();
+        const montos = generarMontosRapidos(total);
+        const botonesEl = document.getElementById("posMontosBotones");
+        if (botonesEl && total > 0) {
+            botonesEl.innerHTML = montos.map(m => `
+                <button onclick="document.getElementById('posEfectivoRecibido').value=${m};calcularCambio();"
+                    style="padding:7px 14px;border-radius:20px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:13px;font-weight:600;cursor:pointer;">
+                    ${m.toLocaleString("es-CU")}
+                </button>`).join("");
+        }
+    }
+}
+
+function getTotalPOS() {
+    const descGlobal = Math.min(100, Math.max(0, Number(document.getElementById("posDescGlobal").value) || 0));
+    let subtotal = 0;
+    posCarritoItems.forEach(item => {
+        const precioConDesc = item.precioUnitario * (1 - item.descuento / 100);
+        subtotal += precioConDesc * item.cantidad;
+    });
+    return subtotal * (1 - descGlobal / 100);
+}
+
+function seleccionarMetodoPOS(btn) {
+    document.querySelectorAll(".pos-metodo").forEach(b => b.classList.remove("activo"));
+    btn.classList.add("activo");
+    posMetodoActual = btn.dataset.metodo;
+    document.getElementById("posEfectivoBloque").style.display = posMetodoActual === "efectivo" ? "block" : "none";
+    document.getElementById("posMixtoBloque").classList.toggle("oculto", posMetodoActual !== "mixto");
+    document.getElementById("posFiadoBloque").classList.toggle("oculto", posMetodoActual !== "fiado");
+
+    if (posMetodoActual === "efectivo") {
+        // Generar botones de monto rápido basados en el total actual
+        const total = getTotalPOS();
+        const montos = generarMontosRapidos(total);
+        const botonesEl = document.getElementById("posMontosBotones");
+        if (botonesEl) {
+            botonesEl.innerHTML = montos.map(m => `
+                <button onclick="document.getElementById('posEfectivoRecibido').value=${m};calcularCambio();"
+                    style="padding:7px 14px;border-radius:20px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:13px;font-weight:600;cursor:pointer;transition:0.12s;"
+                    onmousedown="this.style.background='var(--accent)';this.style.color='#0a0f0d';"
+                    onmouseup="this.style.background='var(--surface2)';this.style.color='var(--text)';">
+                    ${m.toLocaleString("es-CU")}
+                </button>`).join("");
+        }
+        document.getElementById("posEfectivoRecibido").value = "";
+        document.getElementById("posCambio").innerText = "—";
+        document.getElementById("posCambio").style.color = "var(--text3)";
+    }
+}
+
+function generarMontosRapidos(total) {
+    if (total === 0) return [];
+    // Genera: monto exacto + redondeos hacia arriba
+    const montos = new Set();
+    montos.add(total); // Monto exacto
+    // Redondear a múltiplos convenientes
+    const redondeos = [50, 100, 200, 500, 1000];
+    for (const r of redondeos) {
+        const redondeado = Math.ceil(total / r) * r;
+        if (redondeado > total && redondeado <= total * 2) montos.add(redondeado);
+        if (montos.size >= 4) break;
+    }
+    return [...montos].sort((a, b) => a - b).slice(0, 4);
+}
+
+function calcularCambio() {
+    if (posMetodoActual !== "efectivo") return;
+    const total = getTotalPOS();
+    const recibido = Number(document.getElementById("posEfectivoRecibido").value) || 0;
+    const cambioEl = document.getElementById("posCambio");
+    if (recibido === 0) {
+        cambioEl.innerText = "—";
+        cambioEl.style.color = "var(--text3)";
+        return;
+    }
+    const cambio = recibido - total;
+    cambioEl.innerText = cambio >= 0 ? cambio.toLocaleString("es-CU") : "Falta " + Math.abs(cambio).toLocaleString("es-CU");
+    cambioEl.style.color = cambio >= 0 ? "var(--accent)" : "var(--warn)";
+}
+
+function calcularMixto() {
+    if (posMetodoActual !== "mixto") return;
+    const total = getTotalPOS();
+    const efectivo = Number(document.getElementById("posMixtoEfectivo").value) || 0;
+    const transf = Number(document.getElementById("posMixtoTransferencia").value) || 0;
+    const restante = total - efectivo - transf;
+    const moneda = DB.configuracion.moneda || "CUP";
+    const el = document.getElementById("posMixtoRestante");
+    if (restante > 0) {
+        el.innerText = `Falta: ${restante.toLocaleString("es-CU")} ${moneda}`;
+        el.style.color = "var(--warn)";
+    } else if (restante < 0) {
+        el.innerText = `Cambio: ${Math.abs(restante).toLocaleString("es-CU")} ${moneda}`;
+        el.style.color = "var(--accent)";
+    } else {
+        el.innerText = "✅ Monto exacto";
+        el.style.color = "var(--accent)";
+    }
+}
+
+function procesarVentaPOS() {
+    if (posCarritoItems.length === 0) { mostrarToast("⚠️ El carrito está vacío"); return; }
+    const total = getTotalPOS();
+    const moneda = DB.configuracion.moneda || "CUP";
+
+    // Validaciones por método
+    if (posMetodoActual === "efectivo") {
+        const recibido = Number(document.getElementById("posEfectivoRecibido").value) || 0;
+        if (recibido > 0 && recibido < total) {
+            mostrarToast("⚠️ El monto recibido es menor al total");
+            return;
+        }
+    }
+    if (posMetodoActual === "fiado") {
+        const clienteId = document.getElementById("posClienteId").value;
+        if (!clienteId) { mostrarToast("⚠️ Selecciona un cliente para venta fiada"); return; }
+        // Verificar límite de crédito
+        const cli = DB.buscarCliente(clienteId);
+        if (cli && cli.limiteCredito > 0) {
+            const saldo = DB.saldoCliente(clienteId);
+            if (saldo + total > cli.limiteCredito) {
+                if (!confirm(`⚠️ ${cli.nombre} supera su límite de crédito. ¿Continuar?`)) return;
+            }
+        }
+    }
+    if (posMetodoActual === "mixto") {
+        const ef = Number(document.getElementById("posMixtoEfectivo").value) || 0;
+        const tr = Number(document.getElementById("posMixtoTransferencia").value) || 0;
+        if (ef + tr < total) { mostrarToast("⚠️ El monto total no cubre la venta"); return; }
+    }
+
+    // Procesar cada item del carrito
+    const descGlobal = Math.min(100, Math.max(0, Number(document.getElementById("posDescGlobal").value) || 0));
+    const clienteId = posMetodoActual === "fiado" ? document.getElementById("posClienteId").value : null;
+    const cli = clienteId ? DB.buscarCliente(clienteId) : null;
+    const fechaVenta = new Date().toISOString();
+
+    posCarritoItems.forEach(item => {
+        const precioConDesc = item.precioUnitario * (1 - item.descuento / 100) * (1 - descGlobal / 100);
+        let costoReal = null;
+
+        if (item.producto.usaFifo) {
+            const resultado = DB.consumirLotesFIFO(item.producto.id, item.cantidad);
+            costoReal = resultado.costoUnitarioPromedio;
+        } else {
+            const prod = DB.buscarProducto(item.producto.id);
+            DB.actualizarProducto(item.producto.id, { cantidad: prod.cantidad - item.cantidad });
+        }
+
+        DB.registrarMovimiento("salida", item.producto.id, {
+            cantidad: item.cantidad,
+            precioUnitario: precioConDesc,
+            costoReal,
+            metodoPago: posMetodoActual === "mixto" ? "mixto" : posMetodoActual,
+            montoEfectivo: posMetodoActual === "mixto" ? (Number(document.getElementById("posMixtoEfectivo").value) || 0) : (posMetodoActual === "efectivo" ? (Number(document.getElementById("posEfectivoRecibido").value) || 0) : 0),
+            montoTransferencia: posMetodoActual === "mixto" ? (Number(document.getElementById("posMixtoTransferencia").value) || 0) : 0,
+            cliente: cli ? cli.nombre : "",
+            clienteId,
+            nota: `Venta POS${item.descuento > 0 ? ` (desc. ${item.descuento}%)` : ""}${descGlobal > 0 ? ` (desc. global ${descGlobal}%)` : ""}`,
+            fecha: fechaVenta
+        });
+    });
+
+    // Actualizar método predeterminado (excepto fiado)
+    if (posMetodoActual !== "fiado") {
+        DB.configuracion.metodoPagoDefault = posMetodoActual;
+        DB.guardar();
+    }
+
+    const cambio = posMetodoActual === "efectivo"
+        ? Math.max(0, (Number(document.getElementById("posEfectivoRecibido").value) || 0) - total)
+        : 0;
+
+    const msg = `✅ Venta registrada\nTotal: ${total.toLocaleString("es-CU")} ${moneda}${cambio > 0 ? `\nCambio: ${cambio.toLocaleString("es-CU")} ${moneda}` : ""}`;
+    mostrarToast(msg.split("\n")[0]);
+
+    actualizarInicio();
+    abrirCajaPOS(); // Limpia y queda listo para nueva venta
+}
+
+// ── Cierre de Caja ──
+function renderCierreCaja() {
+    const hoy = new Date();
+    const inicio = new Date(hoy); inicio.setHours(0,0,0,0);
+    const fin = new Date(hoy); fin.setHours(23,59,59,999);
+    const moneda = DB.configuracion.moneda || "CUP";
+
+    document.getElementById("cierreFecha").innerText = hoy.toLocaleDateString("es-CU", { weekday:"long", day:"numeric", month:"long" });
+
+    const ventasHoy = DB.movimientos.filter(m =>
+        m.tipo === "salida" && new Date(m.fecha) >= inicio && new Date(m.fecha) <= fin
+    );
+
+    const totalVentas = ventasHoy.reduce((s, m) => s + (m.precioUnitario||0)*(m.cantidad||0), 0);
+
+    // Desglose por método — mixto usa los montos guardados
+    let efectivoTotal = 0, transferenciaTotal = 0, fiadoTotal = 0;
+    ventasHoy.forEach(m => {
+        const monto = (m.precioUnitario||0)*(m.cantidad||0);
+        if (m.metodoPago === "efectivo") {
+            efectivoTotal += monto;
+        } else if (m.metodoPago === "transfermovil" || m.metodoPago === "enzona") {
+            transferenciaTotal += monto;
+        } else if (m.metodoPago === "fiado") {
+            fiadoTotal += monto;
+        } else if (m.metodoPago === "mixto") {
+            // Usar montos reales guardados si existen
+            efectivoTotal += m.montoEfectivo || 0;
+            transferenciaTotal += m.montoTransferencia || 0;
+        }
+    });
+    const unidades = ventasHoy.reduce((s, m) => s + (m.cantidad||0), 0);
+    const costo = ventasHoy.reduce((s, m) => s + (typeof m.costoReal==="number" ? m.costoReal : 0)*(m.cantidad||0), 0);
+    const ganancia = totalVentas - costo;
+
+    document.getElementById("cierreTotalVentas").innerText = totalVentas.toLocaleString("es-CU") + " " + moneda;
+    document.getElementById("cierreEfectivo").innerText = efectivoTotal.toLocaleString("es-CU") + " " + moneda;
+    document.getElementById("cierreTransferencia").innerText = transferenciaTotal.toLocaleString("es-CU") + " " + moneda;
+    document.getElementById("cierreFiado").innerText = fiadoTotal.toLocaleString("es-CU") + " " + moneda;
+    document.getElementById("cierreTransacciones").innerText = ventasHoy.length;
+    document.getElementById("cierreUnidades").innerText = unidades;
+    document.getElementById("cierreIngresos").innerText = totalVentas.toLocaleString("es-CU") + " " + moneda;
+    document.getElementById("cierreCosto").innerText = costo.toLocaleString("es-CU") + " " + moneda;
+    document.getElementById("cierreGanancia").innerText = ganancia.toLocaleString("es-CU") + " " + moneda;
+
+    // Top productos del día
+    const porProducto = {};
+    ventasHoy.forEach(m => {
+        const p = DB.buscarProducto(m.productoId);
+        if (!p) return;
+        if (!porProducto[p.id]) porProducto[p.id] = { nombre: p.nombre, cantidad: 0, total: 0 };
+        porProducto[p.id].cantidad += m.cantidad || 0;
+        porProducto[p.id].total += (m.precioUnitario||0)*(m.cantidad||0);
+    });
+    const top = Object.values(porProducto).sort((a,b) => b.total-a.total).slice(0,5);
+    const topEl = document.getElementById("cierreTopProductos");
+    topEl.innerHTML = top.length === 0
+        ? `<div class="cfg-row" style="cursor:default;"><div class="cfg-row-body"><span class="cfg-row-sub">Sin ventas registradas hoy</span></div></div>`
+        : top.map((p,i) => `
+            <div class="cfg-row" style="cursor:default;">
+                <div class="cfg-row-body"><span class="cfg-row-titulo">${p.nombre}</span><span class="cfg-row-sub">${p.cantidad} unidades</span></div>
+                <strong style="font-family:'Syne',Arial,sans-serif;color:var(--accent);">${p.total.toLocaleString("es-CU")} ${moneda}</strong>
+            </div>${i<top.length-1?'<div class="cfg-row-sep"></div>':''}`).join("");
+}
+
+function compartirCierreWhatsApp() {
+    const negocio = DB.configuracion.nombreNegocio || "Mi Negocio";
+    const moneda = DB.configuracion.moneda || "CUP";
+    const hoy = new Date().toLocaleDateString("es-CU");
+    const ventas = document.getElementById("cierreTotalVentas").innerText;
+    const ganancia = document.getElementById("cierreGanancia").innerText;
+    const transacciones = document.getElementById("cierreTransacciones").innerText;
+    const txt = `📊 *Cierre de Caja — ${negocio}*\n📅 ${hoy}\n\n💰 Total ventas: ${ventas}\n📈 Ganancia: ${ganancia}\n🧾 Transacciones: ${transacciones}\n\n_Generado con INVENTARY ARB_`;
+    window.open("https://wa.me/?text=" + encodeURIComponent(txt), "_blank");
+}
+
+function exportarCierrePDF() {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    const negocio = DB.configuracion.nombreNegocio || "Mi Negocio";
+    const moneda = DB.configuracion.moneda || "CUP";
+    doc.setFontSize(16);
+    doc.text(`Cierre de Caja — ${negocio}`, 14, 15);
+    doc.setFontSize(11);
+    doc.text(`Fecha: ${new Date().toLocaleDateString("es-CU")}`, 14, 23);
+    doc.setFontSize(10);
+    let y = 35;
+    const add = (l, v) => { doc.text(l, 14, y); doc.text(v, 120, y); y += 8; };
+    add("Total ventas:", document.getElementById("cierreTotalVentas").innerText);
+    add("Efectivo:", document.getElementById("cierreEfectivo").innerText);
+    add("Transferencia:", document.getElementById("cierreTransferencia").innerText);
+    add("Fiado:", document.getElementById("cierreFiado").innerText);
+    add("Transacciones:", document.getElementById("cierreTransacciones").innerText);
+    add("Unidades vendidas:", document.getElementById("cierreUnidades").innerText);
+    y += 4;
+    add("Ganancia neta:", document.getElementById("cierreGanancia").innerText);
+    doc.save(`cierre-caja-${new Date().toISOString().slice(0,10)}.pdf`);
 }
