@@ -620,7 +620,7 @@
     <button class="btn-tool" onclick="abrirCierreCaja()">🔒 Cierre</button>
   </div>
 
-  <!-- Total siempre visible -->
+  <!-- Resumen siempre visible -->
   <div class="pos-total-bar">
     <div class="pos-total-info">
       <span class="pos-total-label">TOTAL</span>
@@ -628,29 +628,40 @@
     </div>
     <div class="pos-total-meta">
       <span id="posItemCount">0 productos</span>
-      <span id="posDescuentoGlobal" class="oculto" style="color:var(--warn);">Desc. global: <span id="posDescuentoGlobalVal">0</span>%</span>
     </div>
   </div>
 
+  <!-- Buscar y escanear productos -->
+  <div class="pos-toolbar">
+    <button class="pos-toolbar-btn" onclick="abrirSheetProductosPOS()">🔍 Buscar producto</button>
+    <button class="pos-toolbar-scan" onclick="abrirEscanerPOS()">📷</button>
+  </div>
+
   <!-- Carrito -->
-  <div id="posCarrito" style="padding:0 16px; display:flex; flex-direction:column; gap:8px; min-height:60px;"></div>
+  <div id="posCarrito" class="pos-carrito-lista"></div>
 
-  <!-- Botón agregar producto -->
-  <div style="padding:10px 16px 6px;">
-    <button class="alm-btn-transferir" onclick="abrirSheetProductosPOS()">＋ Agregar producto</button>
+  <!-- Descuento sobre toda la venta -->
+  <div class="pos-desc-global-row" onclick="abrirDescuentoGlobal()">
+    <span>🏷️ Descuento sobre la venta</span>
+    <span id="posDescGlobalResumen" style="color:var(--text2);">Sin descuento</span>
   </div>
 
-  <!-- Descuento global -->
-  <div style="padding:0 16px 10px; display:flex; gap:8px; align-items:center;">
-    <span style="font-size:13px;color:var(--text2);flex-shrink:0;">Descuento global:</span>
-    <input type="number" id="posDescGlobal" placeholder="0" min="0" max="100"
-      oninput="recalcularTotal()"
-      style="width:70px;padding:8px;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text);font-size:14px;text-align:center;">
-    <span style="font-size:13px;color:var(--text2);">%</span>
+  <div style="height:190px;"></div>
+
+  <!-- Barra fija inferior: total y botón cobrar -->
+  <div class="pos-bottombar" id="posBottombar">
+    <div class="pos-bottombar-resumen" onclick="togglePanelPago()">
+      <span class="pos-bottombar-sub" id="posBottombarSub">0 productos</span>
+      <span class="pos-bottombar-total" id="posBottombarTotal">0 CUP</span>
+    </div>
+    <button class="pos-bottombar-btn" onclick="togglePanelPago()">Cobrar ›</button>
   </div>
 
-  <!-- Método de pago -->
-  <div style="padding:0 16px 8px;">
+  <!-- Panel de pago deslizable (se abre sobre la barra fija, sin cambiar de pantalla) -->
+  <div id="posPagoDrawer" class="pos-pago-drawer oculto">
+    <div class="pos-pago-handle" onclick="togglePanelPago()"></div>
+
+    <!-- Método de pago -->
     <div class="cfg-grupo-label" style="padding:0 0 6px;">MÉTODO DE PAGO</div>
     <div class="pos-metodos">
       <button class="pos-metodo activo" data-metodo="efectivo" onclick="seleccionarMetodoPOS(this)">💵 Efectivo</button>
@@ -659,53 +670,74 @@
       <button class="pos-metodo" data-metodo="fiado" onclick="seleccionarMetodoPOS(this)">📦 Fiado</button>
       <button class="pos-metodo" data-metodo="mixto" onclick="seleccionarMetodoPOS(this)">🔀 Mixto</button>
     </div>
-  </div>
 
-  <!-- Efectivo: monto recibido y cambio -->
-  <div id="posEfectivoBloque" style="padding:0 16px 8px;">
-    <div style="display:flex; gap:8px; align-items:center;">
-      <span style="font-size:13px;color:var(--text2);flex-shrink:0;">Recibido:</span>
-      <input type="number" id="posEfectivoRecibido" placeholder="0" min="0"
-        oninput="calcularCambio()"
-        style="flex:1;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text);font-size:16px;font-family:'Syne',Arial,sans-serif;">
-      <div class="pos-cambio-box">
-        <span style="font-size:11px;color:var(--text2);">CAMBIO</span>
-        <strong id="posCambio" style="font-family:'Syne',Arial,sans-serif;color:var(--text3);">—</strong>
+    <!-- Efectivo: monto recibido y cambio -->
+    <div id="posEfectivoBloque" style="padding-top:10px;">
+      <div style="display:flex; gap:8px; align-items:center;">
+        <span style="font-size:13px;color:var(--text2);flex-shrink:0;">Recibido:</span>
+        <input type="number" id="posEfectivoRecibido" placeholder="0" min="0"
+          oninput="calcularCambio()"
+          style="flex:1;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text);font-size:16px;font-family:'Syne',Arial,sans-serif;">
+        <div class="pos-cambio-box">
+          <span style="font-size:11px;color:var(--text2);">CAMBIO</span>
+          <strong id="posCambio" style="font-family:'Syne',Arial,sans-serif;color:var(--text3);">—</strong>
+        </div>
       </div>
+      <!-- Botones rápidos de monto -->
+      <div id="posMontosBotones" style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;"></div>
     </div>
-    <!-- Botones rápidos de monto -->
-    <div id="posMontosBotones" style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;"></div>
-  </div>
 
-  <!-- Pago mixto -->
-  <div id="posMixtoBloque" class="oculto" style="padding:0 16px 8px;">
-    <div style="display:flex; gap:8px; margin-bottom:6px;">
-      <div style="flex:1;">
-        <span style="font-size:11px;color:var(--text2);">Efectivo</span>
-        <input type="number" id="posMixtoEfectivo" placeholder="0" oninput="calcularMixto()"
-          style="width:100%;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text);font-size:15px;box-sizing:border-box;">
+    <!-- Pago mixto -->
+    <div id="posMixtoBloque" class="oculto" style="padding-top:10px;">
+      <div style="display:flex; gap:8px; margin-bottom:6px;">
+        <div style="flex:1;">
+          <span style="font-size:11px;color:var(--text2);">Efectivo</span>
+          <input type="number" id="posMixtoEfectivo" placeholder="0" oninput="calcularMixto()"
+            style="width:100%;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text);font-size:15px;box-sizing:border-box;">
+        </div>
+        <div style="flex:1;">
+          <span style="font-size:11px;color:var(--text2);">Transferencia</span>
+          <input type="number" id="posMixtoTransferencia" placeholder="0" oninput="calcularMixto()"
+            style="width:100%;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text);font-size:15px;box-sizing:border-box;">
+        </div>
       </div>
-      <div style="flex:1;">
-        <span style="font-size:11px;color:var(--text2);">Transferencia</span>
-        <input type="number" id="posMixtoTransferencia" placeholder="0" oninput="calcularMixto()"
-          style="width:100%;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text);font-size:15px;box-sizing:border-box;">
+      <div id="posMixtoRestante" style="font-size:13px;color:var(--text2);text-align:center;"></div>
+    </div>
+
+    <!-- Fiado: selector de cliente -->
+    <div id="posFiadoBloque" class="oculto" style="padding-top:10px;">
+      <div class="campo-producto-sel" onclick="abrirSheetClientes()">
+        <span id="textoClientePOS" class="texto-prod-placeholder">Toca para seleccionar cliente...</span>
+        <span class="arrow-prod">›</span>
       </div>
+      <input type="hidden" id="posClienteId">
     </div>
-    <div id="posMixtoRestante" style="font-size:13px;color:var(--text2);text-align:center;"></div>
-  </div>
 
-  <!-- Fiado: selector de cliente -->
-  <div id="posFiadoBloque" class="oculto" style="padding:0 16px 8px;">
-    <div class="campo-producto-sel" onclick="abrirSheetClientes()">
-      <span id="textoClientePOS" class="texto-prod-placeholder">Toca para seleccionar cliente...</span>
-      <span class="arrow-prod">›</span>
+    <!-- Confirmar cobro -->
+    <div style="padding-top:14px;">
+      <button id="btnCobrarPOS" onclick="procesarVentaPOS()">✅ Confirmar cobro</button>
     </div>
-    <input type="hidden" id="posClienteId">
   </div>
+</div>
 
-  <!-- Botón cobrar -->
-  <div style="padding:8px 16px 100px;">
-    <button id="btnCobrarPOS" onclick="procesarVentaPOS()">✅ Cobrar</button>
+<!-- Pantalla de factura tras el cobro -->
+<div id="pantallaFacturaPOS" class="modal oculto">
+  <div class="modal-contenido pos-factura-contenido">
+    <div class="pos-factura-check">✅</div>
+    <h2 class="pos-factura-titulo">Venta realizada</h2>
+    <div class="pos-factura-datos">
+      <div class="pos-factura-fila"><span>N.° de factura</span><strong id="facturaPOSNumero">—</strong></div>
+      <div class="pos-factura-fila"><span>Total</span><strong id="facturaPOSTotal">—</strong></div>
+      <div class="pos-factura-fila" id="facturaPOSCambioFila"><span>Cambio</span><strong id="facturaPOSCambio">—</strong></div>
+      <div class="pos-factura-fila" id="facturaPOSClienteFila"><span>Cliente</span><strong id="facturaPOSCliente">—</strong></div>
+    </div>
+    <button class="pos-factura-vertoggle" id="btnVerFacturaPOS" onclick="toggleDetalleFacturaPOS()">Ver factura ›</button>
+    <div id="facturaPOSDetalle" class="pos-factura-detalle oculto"></div>
+    <div class="pos-factura-acciones">
+      <button class="pos-factura-btn-secundario" onclick="compartirFacturaPOS()">📤 Compartir</button>
+      <button class="pos-factura-btn-secundario" onclick="proximamente('Imprimir factura')">🖨️ Imprimir</button>
+    </div>
+    <button class="pos-factura-btn-principal" onclick="cerrarFacturaPOSyNuevaVenta()">＋ Nueva venta</button>
   </div>
 </div>
 
@@ -714,9 +746,15 @@
 <!-- ═══════════════════════════════════════════════ -->
 <div id="pantallaCierreCaja" class="pantalla">
   <div class="header">
-    <button class="btn-back" onclick="volverCajaPOS()">‹</button>
+    <button class="btn-back" onclick="volverDesdeCierre()">‹</button>
     <div class="header-left"><h1>📊 Cierre de Caja</h1><p id="cierreFecha">Hoy</p></div>
     <button class="btn-tool" onclick="exportarCierrePDF()">📄</button>
+  </div>
+
+  <!-- Selector de fecha -->
+  <div style="padding:12px 20px 4px; display:flex; gap:10px; align-items:center;">
+    <input type="date" id="cierreFechaSelector" class="rep-date-input" style="flex:1;" onchange="renderCierreCaja()">
+    <button onclick="setCierreHoy()" style="padding:10px 14px;border-radius:10px;border:1px solid var(--accent);background:rgba(0,232,150,0.1);color:var(--accent);font-size:13px;font-weight:600;cursor:pointer;">Hoy</button>
   </div>
 
   <div class="cfg-grupo-label" style="padding-top:14px;">VENTAS DEL DÍA</div>
@@ -1117,8 +1155,11 @@
   <div class="cfg-grupo-label">GASTOS POR CATEGORÍA</div>
   <div id="repGastosCategorias" class="cfg-grupo"></div>
 
-  <div style="padding:14px 20px 20px;">
+  <div style="padding:14px 20px 6px;">
     <button class="alm-btn-transferir" onclick="compartirReporteWhatsApp()">📲 Compartir resumen por WhatsApp</button>
+  </div>
+  <div style="padding:0 20px 20px;">
+    <button class="alm-btn-transferir" onclick="abrirCierreDesdeReportes()" style="border-color:rgba(99,179,237,0.4);background:rgba(99,179,237,0.08);color:#63b3ed;">📊 Ver Cierre de Caja</button>
   </div>
   <div style="height:90px;"></div>
 </div>
@@ -2317,6 +2358,20 @@
 </div>
 </div>
 
+<div id="modalGenerico" class="modal oculto">
+<div class="modal-contenido" style="max-height:400px;">
+  <div class="modal-header"><h2 id="mgTitulo">Título</h2><button class="btn-cerrar" onclick="cerrarModalGenerico()">✕</button></div>
+  <p id="mgMensaje" class="oculto" style="font-size:14px;color:var(--text2);line-height:1.6;"></p>
+  <div id="mgTiposWrap" class="pos-desc-tipos oculto">
+    <button class="pos-desc-tipo activo" data-tipo="porcentaje" onclick="mgSeleccionarTipo(this)">% Porcentaje</button>
+    <button class="pos-desc-tipo" data-tipo="monto" onclick="mgSeleccionarTipo(this)">Importe fijo</button>
+  </div>
+  <input type="number" id="mgInput" class="oculto" placeholder="0">
+  <button id="mgBtnConfirmar" onclick="mgConfirmar()" style="width:100%;padding:15px;background:linear-gradient(135deg, var(--accent), var(--accent2));color:#0a0f0d;border:none;border-radius:14px;font-size:15px;font-weight:700;margin-top:16px;cursor:pointer;font-family:'Syne',Arial,sans-serif;">Confirmar</button>
+  <button id="mgBtnSecundario" onclick="mgSecundario()" class="oculto" style="width:100%;padding:12px;background:none;border:none;color:var(--text2);font-size:13px;margin-top:6px;cursor:pointer;">Secundario</button>
+</div>
+</div>
+
 <div id="modalEscaner" class="modal oculto">
 <div class="modal-contenido" style="height:420px;">
   <div class="modal-header"><h2>📷 Escanear código</h2><button class="btn-cerrar" onclick="cerrarEscaner()">✕</button></div>
@@ -2350,6 +2405,7 @@
     <div class="sheet-header"><h3>Seleccionar Producto</h3><button class="btn-cerrar" onclick="cerrarSheetProductos()">✕</button></div>
     <div class="sheet-search"><input type="text" id="sheetBuscador" placeholder="🔍 Buscar por nombre o código..." oninput="filtrarSheet()" autocomplete="off"></div>
     <div class="sheet-filtros" id="sheetFiltros"><button class="chip-filtro activo" data-filtro="" onclick="seleccionarFiltroSheet(this)">Todos</button></div>
+    <div id="sheetPosSugerencias" class="pos-sugerencias oculto"></div>
     <div class="sheet-lista" id="sheetLista"></div>
     <div class="sheet-footer"><span id="sheetContador">0 productos</span></div>
   </div>

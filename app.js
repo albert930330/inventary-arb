@@ -275,6 +275,7 @@ let vistaReporteActual = "dia";
 let onatTabActual = "panel";
 let posCarritoItems = []; // [{producto, cantidad, precioUnitario, descuento}]
 let posMetodoActual = "efectivo";
+let cierreOrigen = "pos";
 let proveedorActualId = null;
 let editandoProveedorId = null;
 let tabProveedorActual = "estadisticas";
@@ -504,7 +505,11 @@ function abrirCajaPOS() {
     mostrarPantalla("pantallaCajaPOS");
     document.getElementById("btnFlotante").classList.add("ocultar-boton");
     posCarritoItems = [];
-    document.getElementById("posDescGlobal").value = "";
+    posDescGlobalTipo = "porcentaje";
+    posDescGlobalValor = 0;
+    detenerRepeticionPOS();
+    posUltimoEliminado = null;
+    cerrarPanelPago();
     document.getElementById("posEfectivoRecibido").value = "";
     document.getElementById("posClienteId").value = "";
     document.getElementById("textoClientePOS").className = "texto-prod-placeholder";
@@ -528,8 +533,32 @@ function volverCajaPOS() {
 }
 
 function abrirCierreCaja() {
+    cierreOrigen = "pos";
     mostrarPantalla("pantallaCierreCaja");
     document.getElementById("btnFlotante").classList.add("ocultar-boton");
+    setCierreHoy();
+}
+
+function abrirCierreDesdeReportes() {
+    cierreOrigen = "reportes";
+    mostrarPantalla("pantallaCierreCaja");
+    document.getElementById("btnFlotante").classList.add("ocultar-boton");
+    setCierreHoy();
+}
+
+function volverDesdeCierre() {
+    if (cierreOrigen === "reportes") {
+        mostrarPantalla("pantallaReportes", "atras");
+    } else {
+        volverCajaPOS();
+    }
+    document.getElementById("btnFlotante").classList.add("ocultar-boton");
+}
+
+function setCierreHoy() {
+    const hoy = new Date().toISOString().slice(0, 10);
+    const sel = document.getElementById("cierreFechaSelector");
+    if (sel) sel.value = hoy;
     renderCierreCaja();
 }
 
@@ -652,6 +681,8 @@ function abrirEscaner(campo) {
             if (campoDestino === "movCodigoBarras") {
                 document.getElementById(campoDestino).value = codigo;
                 buscarPorCodigoMov();
+            } else if (campoDestino === "posCodigoScan") {
+                procesarCodigoEscaneadoPOS(codigo);
             } else {
                 document.getElementById(campoDestino).value = codigo;
                 const existe = DB.buscarPorCodigo(codigo);
@@ -666,6 +697,135 @@ function cerrarEscaner() {
     if (escaner) { escaner.stop().catch(() => {}); escaner = null; }
     document.getElementById("modalEscaner").classList.add("oculto");
 }
+
+// ═══════════════════════════════════════════════
+// MODAL GENÉRICO REUTILIZABLE
+// ═══════════════════════════════════════════════
+// Reemplaza prompt()/confirm() con un componente único y reutilizable.
+// Por ahora solo lo usa el módulo Caja POS (descuentos y confirmación de
+// fiado), pero está pensado para reutilizarse en el resto de la app sin
+// crear un modal nuevo por cada caso de uso.
+//
+// Tipos soportados:
+//   "confirmar"  -> solo título + mensaje + botón de acción (y opcional cancelar)
+//   "numero"     -> input numérico simple
+//   "porcentaje" -> input numérico + selector porcentaje/importe fijo
+//   "texto"      -> input de texto libre
+//
+// Uso:
+//   mostrarModalGenerico({
+//     tipo: "porcentaje",
+//     titulo: "Descuento",
+//     valorInicial: 10,
+//     tipoDescInicial: "porcentaje",
+//     textoConfirmar: "Aplicar",
+//     textoSecundario: "Quitar",
+//     onConfirmar: (resultado) => {...},
+//     onSecundario: () => {...}
+//   });
+
+let mgState = null;
+
+function mostrarModalGenerico({
+    tipo = "confirmar",
+    titulo = "",
+    mensaje = "",
+    valorInicial = "",
+    placeholder = "",
+    textoConfirmar = "Confirmar",
+    textoSecundario = null,
+    tipoDescInicial = "porcentaje",
+    onConfirmar = null,
+    onSecundario = null
+} = {}) {
+    mgState = { tipo, onConfirmar, onSecundario, tipoDescActual: tipoDescInicial };
+
+    document.getElementById("mgTitulo").innerText = titulo;
+    const mensajeEl = document.getElementById("mgMensaje");
+    mensajeEl.innerHTML = mensaje;
+    mensajeEl.classList.toggle("oculto", !mensaje);
+
+    const inputEl = document.getElementById("mgInput");
+    const tiposWrap = document.getElementById("mgTiposWrap");
+    const secundarioBtn = document.getElementById("mgBtnSecundario");
+
+    if (tipo === "confirmar") {
+        inputEl.classList.add("oculto");
+        tiposWrap.classList.add("oculto");
+    } else if (tipo === "porcentaje") {
+        inputEl.classList.remove("oculto");
+        inputEl.type = "number";
+        inputEl.placeholder = placeholder || "0";
+        inputEl.value = valorInicial;
+        tiposWrap.classList.remove("oculto");
+        document.querySelectorAll("#mgTiposWrap .pos-desc-tipo").forEach(b => b.classList.toggle("activo", b.dataset.tipo === tipoDescInicial));
+    } else if (tipo === "numero") {
+        inputEl.classList.remove("oculto");
+        inputEl.type = "number";
+        inputEl.placeholder = placeholder || "0";
+        inputEl.value = valorInicial;
+        tiposWrap.classList.add("oculto");
+    } else if (tipo === "texto") {
+        inputEl.classList.remove("oculto");
+        inputEl.type = "text";
+        inputEl.placeholder = placeholder || "";
+        inputEl.value = valorInicial;
+        tiposWrap.classList.add("oculto");
+    }
+
+    document.getElementById("mgBtnConfirmar").innerText = textoConfirmar;
+    if (textoSecundario) {
+        secundarioBtn.classList.remove("oculto");
+        secundarioBtn.innerText = textoSecundario;
+    } else {
+        secundarioBtn.classList.add("oculto");
+    }
+
+    document.getElementById("modalGenerico").classList.remove("oculto");
+    setTimeout(() => {
+        if (!inputEl.classList.contains("oculto")) { inputEl.focus(); inputEl.select(); }
+    }, 250);
+}
+
+function mgSeleccionarTipo(btn) {
+    document.querySelectorAll("#mgTiposWrap .pos-desc-tipo").forEach(b => b.classList.remove("activo"));
+    btn.classList.add("activo");
+    if (mgState) mgState.tipoDescActual = btn.dataset.tipo;
+}
+
+function cerrarModalGenerico() {
+    document.getElementById("modalGenerico").classList.add("oculto");
+    mgState = null;
+}
+
+function mgConfirmar() {
+    if (!mgState) return;
+    const inputEl = document.getElementById("mgInput");
+    let valor = null;
+
+    if (mgState.tipo === "confirmar") {
+        valor = true;
+    } else if (mgState.tipo === "porcentaje") {
+        let n = Math.max(0, Number(inputEl.value) || 0);
+        if (mgState.tipoDescActual === "porcentaje") n = Math.min(100, n);
+        valor = { tipo: mgState.tipoDescActual, valor: n };
+    } else if (mgState.tipo === "numero") {
+        valor = Math.max(0, Number(inputEl.value) || 0);
+    } else if (mgState.tipo === "texto") {
+        valor = inputEl.value.trim();
+    }
+
+    const cb = mgState.onConfirmar;
+    cerrarModalGenerico();
+    if (cb) cb(valor);
+}
+
+function mgSecundario() {
+    const cb = mgState ? mgState.onSecundario : null;
+    cerrarModalGenerico();
+    if (cb) cb();
+}
+
 
 // ═══════════════════════════════════════════════
 // INICIO
@@ -1526,6 +1686,9 @@ function seleccionarFiltroSheet(btn) {
 function filtrarSheet() { renderSheetLista(); }
 
 function renderSheetLista() {
+    const sugEl = document.getElementById("sheetPosSugerencias");
+    if (sugEl) sugEl.classList.toggle("oculto", sheetModo !== "pos");
+
     const texto = document.getElementById("sheetBuscador").value.toLowerCase().trim();
     const lista = document.getElementById("sheetLista");
     let productos = [...DB.productos].sort((a, b) => a.nombre.localeCompare(b.nombre));
@@ -4521,8 +4684,30 @@ function exportarProveedoresPDF() {
 }
 
 // ═══════════════════════════════════════════════
-// MÓDULO CAJA POS
+// MÓDULO CAJA POS 3.1
 // ═══════════════════════════════════════════════
+// Reutiliza el núcleo existente: DB.consumirLotesFIFO, DB.registrarMovimiento,
+// escalaAplicable, DB.buscarProducto, DB.buscarCliente, DB.actualizarProducto,
+// DB.configuracion (incl. proxFactura/numAuto), cierre de caja, ONAT.
+// No se duplica lógica de negocio en ningún punto de este módulo.
+
+// Long-press configurable (fácil de ajustar sin tocar la lógica)
+const POS_LONG_PRESS_DELAY = 350;
+const POS_REPEAT_INTERVAL = 80;
+
+// Descuentos (porcentaje o importe fijo, a nivel de producto o de venta)
+let posDescGlobalTipo = "porcentaje";
+let posDescGlobalValor = 0;
+
+// Long-press de los botones +/- de cantidad
+let posRepeticionDelay = null;
+let posRepeticionTimer = null;
+
+// Undo de eliminación de producto
+let posUltimoEliminado = null;
+
+// Última venta registrada (para la pantalla de factura)
+let posUltimaVenta = null;
 
 function abrirSheetProductosPOS() {
     sheetModo = "pos";
@@ -4532,203 +4717,418 @@ function abrirSheetProductosPOS() {
     ubicaciones.forEach(ub => { filtrosEl.innerHTML += `<button class="chip-filtro" data-filtro="${ub}" onclick="seleccionarFiltroSheet(this)">📍 ${ub}</button>`; });
     sheetFiltroActivo = "";
     document.getElementById("sheetBuscador").value = "";
+    renderSugerenciasPOS();
     renderSheetLista();
     document.getElementById("sheetProductos").classList.remove("oculto");
     setTimeout(() => document.getElementById("sheetBuscador").focus(), 300);
 }
 
-function seleccionarProductoPOS(id) {
+// ── Favoritos (más vendidos) y recientes ──
+// Se calculan a partir de DB.movimientos existentes, sin crear ni un campo
+// ni un almacenamiento paralelo.
+function calcularMasVendidosPOS(limite) {
+    const conteo = {};
+    DB.movimientos.forEach(m => {
+        if (m.tipo !== "salida") return;
+        conteo[m.productoId] = (conteo[m.productoId] || 0) + (m.cantidad || 0);
+    });
+    return Object.entries(conteo)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, limite)
+        .map(([id]) => DB.buscarProducto(id))
+        .filter(Boolean);
+}
+
+function calcularRecientesPOS(limite) {
+    const vistos = new Set();
+    const resultado = [];
+    [...DB.movimientos]
+        .filter(m => m.tipo === "salida")
+        .sort((a, b) => new Date(b.fecha) - new Date(a.fecha))
+        .forEach(m => {
+            if (vistos.has(m.productoId) || resultado.length >= limite) return;
+            const p = DB.buscarProducto(m.productoId);
+            if (p) { vistos.add(m.productoId); resultado.push(p); }
+        });
+    return resultado;
+}
+
+function renderSugerenciasPOS() {
+    const cont = document.getElementById("sheetPosSugerencias");
+    if (!cont) return;
+    const masVendidos = calcularMasVendidosPOS(8).filter(p => p.cantidad > 0 || DB.configuracion.ventasSinStock);
+    const recientesBase = calcularRecientesPOS(8).filter(p => p.cantidad > 0 || DB.configuracion.ventasSinStock);
+    const recientes = recientesBase.filter(p => !masVendidos.find(m => m.id === p.id));
+
+    let html = "";
+    if (masVendidos.length) {
+        html += `<div class="pos-sugerencias-titulo">⭐ Más vendidos</div><div class="pos-sugerencias-fila">${masVendidos.map(chipSugerenciaPOS).join("")}</div>`;
+    }
+    if (recientes.length) {
+        html += `<div class="pos-sugerencias-titulo">🕒 Recientes</div><div class="pos-sugerencias-fila">${recientes.map(chipSugerenciaPOS).join("")}</div>`;
+    }
+    cont.innerHTML = html;
+}
+
+function chipSugerenciaPOS(p) {
+    const icono = ICONOS[p.categoria] || "📦";
+    return `<button class="pos-sugerencia-chip" onclick="seleccionarProductoPOS('${p.id}')">${icono} ${p.nombre}</button>`;
+}
+
+// ── Escaneo de código de barras integrado (reutiliza abrirEscaner/DB.buscarPorCodigo) ──
+function abrirEscanerPOS() {
+    abrirEscaner("posCodigoScan");
+}
+
+function procesarCodigoEscaneadoPOS(codigo) {
+    const p = DB.buscarPorCodigo(codigo);
+    if (!p) { mostrarToastPOS({ texto: `⚠️ Código no encontrado: ${codigo}` }); return; }
+    seleccionarProductoPOS(p.id, { desdeEscaner: true });
+}
+
+function seleccionarProductoPOS(id, opciones = {}) {
     const p = DB.buscarProducto(id);
     if (!p) return;
     if (p.cantidad <= 0 && !DB.configuracion.ventasSinStock) {
-        mostrarToast("⚠️ Sin stock disponible");
-        cerrarSheetProductos();
+        mostrarToastPOS({ texto: "⚠️ Sin stock disponible" });
         return;
     }
-    // Si ya está en el carrito, suma 1
     const existente = posCarritoItems.find(item => item.producto.id === id);
+    let cantidadFinal;
     if (existente) {
+        if (existente.cantidad + 1 > p.cantidad && !DB.configuracion.ventasSinStock) {
+            mostrarToastPOS({ texto: `⚠️ Stock máximo disponible: ${p.cantidad}` });
+            return;
+        }
         existente.cantidad++;
         existente.precioUnitario = calcularPrecioPOS(p, existente.cantidad);
+        cantidadFinal = existente.cantidad;
     } else {
         posCarritoItems.push({
             producto: p,
             cantidad: 1,
             precioUnitario: calcularPrecioPOS(p, 1),
-            descuento: 0
+            descuento: 0,
+            descuentoTipo: "porcentaje",
+            esNuevo: true
         });
+        cantidadFinal = 1;
     }
-    cerrarSheetProductos();
+
     renderCarrito();
-    mostrarToast(`✅ ${p.nombre} agregado`);
+
+    const item = posCarritoItems.find(i => i.producto.id === id);
+    const subtotalItem = precioConDescuentoItem(item) * item.cantidad;
+    mostrarToastPOS({ producto: p.nombre, cantidad: cantidadFinal, subtotal: subtotalItem });
+
+    // El buscador permanece abierto y listo para seguir agregando productos
+    if (!opciones.desdeEscaner) {
+        const buscadorEl = document.getElementById("sheetBuscador");
+        if (buscadorEl) {
+            buscadorEl.value = "";
+            filtrarSheet();
+            buscadorEl.focus();
+        }
+    }
 }
 
 function calcularPrecioPOS(producto, cantidad) {
-    // Aplica escala mayorista si existe
     const escala = escalaAplicable(producto, cantidad);
     return escala ? escala.precio : (producto.venta || 0);
 }
 
+function precioConDescuentoItem(item) {
+    const base = item.precioUnitario;
+    if (item.descuentoTipo === "monto") return Math.max(0, base - (item.descuento || 0));
+    return base * (1 - (item.descuento || 0) / 100);
+}
+
+function aplicarDescuentoGlobalATotal(subtotal) {
+    if (posDescGlobalValor <= 0) return subtotal;
+    if (posDescGlobalTipo === "monto") return Math.max(0, subtotal - posDescGlobalValor);
+    return subtotal * (1 - posDescGlobalValor / 100);
+}
+
+// renderCarrito(): reconstruye toda la lista. Se usa SOLO cuando cambia el
+// número de renglones (agregar/eliminar producto) o al abrir la Caja.
+// Cambiar cantidad o aplicar un descuento a un renglón existente NO pasa por
+// aquí — usan actualizarRenglonPOS(), que solo toca ese nodo del DOM.
 function renderCarrito() {
     const contenedor = document.getElementById("posCarrito");
     const moneda = DB.configuracion.moneda || "CUP";
 
     if (posCarritoItems.length === 0) {
         contenedor.innerHTML = `<p id="posCarritoVacio" style="text-align:center;color:var(--text2);padding:20px 0;font-size:14px;">Agrega productos para comenzar</p>`;
-        document.getElementById("posTotalAmount").innerText = "0 " + moneda;
-        document.getElementById("posItemCount").innerText = "0 productos";
-        document.getElementById("posDescuentoGlobal").classList.add("oculto");
+        actualizarResumenDescuentoGlobal();
+        recalcularTotal();
         return;
     }
 
-    const descGlobal = Number(document.getElementById("posDescGlobal").value) || 0;
-
     contenedor.innerHTML = posCarritoItems.map((item, idx) => {
         item.precioUnitario = calcularPrecioPOS(item.producto, item.cantidad);
-        const precioConDesc = item.precioUnitario * (1 - item.descuento / 100);
+        const precioConDesc = precioConDescuentoItem(item);
         const subtotal = precioConDesc * item.cantidad;
         const escala = escalaAplicable(item.producto, item.cantidad);
+        const tieneDescuento = (item.descuento || 0) > 0;
+        const etiquetaDescuento = item.descuentoTipo === "monto"
+            ? `−${item.descuento.toLocaleString("es-CU")} ${moneda}`
+            : `−${item.descuento}%`;
+        const animClase = item.esNuevo ? "pos-item-entrando" : "";
+        item.esNuevo = false;
 
         return `
-        <div class="pos-item">
+        <div class="pos-item ${animClase}" id="posRow${idx}">
             <div class="pos-item-info">
                 <div class="pos-item-nombre">${item.producto.nombre}</div>
-                ${escala ? `<div style="font-size:10px;color:var(--accent);">🏷️ ${escala.nombre}</div>` : ""}
-                <div class="pos-item-precio">${item.precioUnitario.toLocaleString("es-CU")} ${moneda}/u${item.descuento > 0 ? ` <span style="color:var(--warn);">−${item.descuento}%</span>` : ""}</div>
+                <div class="pos-item-meta">Disp: ${item.producto.cantidad} ${item.producto.unidad || "u"}${escala ? ` · 🏷️ ${escala.nombre}` : ""}</div>
+                <div class="pos-item-precio" id="posRowPrecio${idx}">${item.precioUnitario.toLocaleString("es-CU")} ${moneda}/u${tieneDescuento ? ` <span style="color:var(--warn);">${etiquetaDescuento}</span>` : ""}</div>
             </div>
             <div class="pos-item-controles">
-                <button class="pos-qty-btn" onclick="cambiarCantidadPOS(${idx}, -1)">−</button>
-                <span class="pos-qty">${item.cantidad}</span>
-                <button class="pos-qty-btn" onclick="cambiarCantidadPOS(${idx}, 1)">+</button>
+                <button class="pos-qty-btn"
+                    onpointerdown="iniciarRepeticionPOS(${idx}, -1)"
+                    onpointerup="detenerRepeticionPOS()" onpointerleave="detenerRepeticionPOS()" onpointercancel="detenerRepeticionPOS()">−</button>
+                <input type="number" inputmode="numeric" class="pos-qty-input" id="posQtyInput${idx}"
+                    value="${item.cantidad}" min="0"
+                    onfocus="this.select()"
+                    onchange="actualizarCantidadInputPOS(${idx}, this.value)">
+                <button class="pos-qty-btn"
+                    onpointerdown="iniciarRepeticionPOS(${idx}, 1)"
+                    onpointerup="detenerRepeticionPOS()" onpointerleave="detenerRepeticionPOS()" onpointercancel="detenerRepeticionPOS()">+</button>
             </div>
             <div class="pos-item-subtotal">
-                <strong>${subtotal.toLocaleString("es-CU")} ${moneda}</strong>
+                <strong id="posRowSubtotal${idx}">${subtotal.toLocaleString("es-CU")} ${moneda}</strong>
                 <div style="display:flex;gap:4px;margin-top:4px;">
-                    <button class="pos-desc-btn" onclick="editarDescuentoItem(${idx})">% desc</button>
+                    <button class="pos-desc-btn" onclick="abrirDescuentoItem(${idx})">% desc</button>
                     <button class="pos-del-btn" onclick="eliminarItemPOS(${idx})">✕ quitar</button>
                 </div>
             </div>
         </div>`;
     }).join("");
 
+    actualizarResumenDescuentoGlobal();
     recalcularTotal();
 }
 
+// Actualiza únicamente el renglón modificado (cantidad o descuento de un
+// producto ya existente en el carrito), sin tocar el resto del DOM.
+function actualizarRenglonPOS(idx) {
+    const item = posCarritoItems[idx];
+    if (!item) return;
+    const moneda = DB.configuracion.moneda || "CUP";
+    item.precioUnitario = calcularPrecioPOS(item.producto, item.cantidad);
+    const precioConDesc = precioConDescuentoItem(item);
+    const subtotal = precioConDesc * item.cantidad;
+
+    const inputEl = document.getElementById(`posQtyInput${idx}`);
+    const subtotalEl = document.getElementById(`posRowSubtotal${idx}`);
+    const precioEl = document.getElementById(`posRowPrecio${idx}`);
+    if (inputEl) inputEl.value = item.cantidad;
+    if (subtotalEl) subtotalEl.innerText = subtotal.toLocaleString("es-CU") + " " + moneda;
+    if (precioEl) {
+        const tieneDescuento = (item.descuento || 0) > 0;
+        const etiquetaDescuento = item.descuentoTipo === "monto"
+            ? `−${item.descuento.toLocaleString("es-CU")} ${moneda}`
+            : `−${item.descuento}%`;
+        precioEl.innerHTML = `${item.precioUnitario.toLocaleString("es-CU")} ${moneda}/u${tieneDescuento ? ` <span style="color:var(--warn);">${etiquetaDescuento}</span>` : ""}`;
+    }
+    recalcularTotal();
+}
+
+// ── Cantidad: botones +/- con actualización parcial y validación de stock ──
 function cambiarCantidadPOS(idx, delta) {
     const item = posCarritoItems[idx];
     if (!item) return;
     const nueva = item.cantidad + delta;
-    if (nueva <= 0) { eliminarItemPOS(idx); return; }
+    if (nueva <= 0) { detenerRepeticionPOS(); eliminarItemPOS(idx); return; }
     if (nueva > item.producto.cantidad && !DB.configuracion.ventasSinStock) {
-        mostrarToast(`⚠️ Solo hay ${item.producto.cantidad} en stock`);
+        detenerRepeticionPOS();
+        mostrarToastPOS({ texto: `⚠️ Stock máximo disponible: ${item.producto.cantidad}` });
+        const inputEl = document.getElementById(`posQtyInput${idx}`);
+        if (inputEl) inputEl.value = item.cantidad;
         return;
     }
     item.cantidad = nueva;
-    item.precioUnitario = calcularPrecioPOS(item.producto, nueva);
-    renderCarrito();
+    actualizarRenglonPOS(idx);
 }
 
-function eliminarItemPOS(idx) {
-    posCarritoItems.splice(idx, 1);
-    renderCarrito();
-}
-
-function editarDescuentoItem(idx) {
+// ── Cantidad: input editable (seleccionar todo al tocar y sobrescribir) ──
+function actualizarCantidadInputPOS(idx, valor) {
     const item = posCarritoItems[idx];
     if (!item) return;
-    const desc = prompt(`Descuento para ${item.producto.nombre} (%):`, item.descuento || 0);
-    if (desc === null) return;
-    const num = Math.min(100, Math.max(0, Number(desc) || 0));
-    item.descuento = num;
+    let nueva = Math.floor(Number(valor)) || 0;
+
+    if (nueva <= 0) { eliminarItemPOS(idx); return; }
+
+    if (nueva > item.producto.cantidad && !DB.configuracion.ventasSinStock) {
+        mostrarToastPOS({ texto: `⚠️ Stock máximo disponible: ${item.producto.cantidad}` });
+        nueva = item.producto.cantidad;
+    }
+    item.cantidad = nueva;
+    actualizarRenglonPOS(idx);
+}
+
+function iniciarRepeticionPOS(idx, delta) {
+    cambiarCantidadPOS(idx, delta);
+    detenerRepeticionPOS();
+    posRepeticionDelay = setTimeout(() => {
+        posRepeticionTimer = setInterval(() => cambiarCantidadPOS(idx, delta), POS_REPEAT_INTERVAL);
+    }, POS_LONG_PRESS_DELAY);
+}
+
+function detenerRepeticionPOS() {
+    clearTimeout(posRepeticionDelay);
+    clearInterval(posRepeticionTimer);
+    posRepeticionDelay = null;
+    posRepeticionTimer = null;
+}
+
+// ── Eliminar: sin confirm(), con animación de salida y opción de deshacer ──
+function eliminarItemPOS(idx) {
+    const item = posCarritoItems[idx];
+    if (!item) return;
+    posUltimoEliminado = { item, idx };
+    const rowEl = document.getElementById(`posRow${idx}`);
+
+    const quitar = () => {
+        const pos = posCarritoItems.indexOf(item);
+        if (pos > -1) posCarritoItems.splice(pos, 1);
+        renderCarrito(); // Cambia el número de renglones: aquí sí es necesario
+    };
+
+    if (rowEl) {
+        rowEl.classList.add("pos-item-saliendo");
+        setTimeout(quitar, 160);
+    } else {
+        quitar();
+    }
+
+    mostrarToastPOS({
+        texto: `🗑️ ${item.producto.nombre} eliminado`,
+        accion: { texto: "Deshacer", fn: "deshacerEliminarPOS()" }
+    });
+}
+
+function deshacerEliminarPOS() {
+    if (!posUltimoEliminado) return;
+    const { item, idx } = posUltimoEliminado;
+    posCarritoItems.splice(Math.min(idx, posCarritoItems.length), 0, item);
+    posUltimoEliminado = null;
     renderCarrito();
+}
+
+// ── Descuentos: usan el modal genérico (ver MODAL GENÉRICO más abajo) ──
+function abrirDescuentoItem(idx) {
+    const item = posCarritoItems[idx];
+    if (!item) return;
+    mostrarModalGenerico({
+        tipo: "porcentaje",
+        titulo: `Descuento — ${item.producto.nombre}`,
+        valorInicial: item.descuento || "",
+        tipoDescInicial: item.descuentoTipo || "porcentaje",
+        textoConfirmar: "Aplicar descuento",
+        textoSecundario: "Quitar descuento",
+        onConfirmar: (resultado) => {
+            item.descuentoTipo = resultado.tipo;
+            item.descuento = resultado.valor;
+            actualizarRenglonPOS(idx); // Actualización parcial, no renderCarrito()
+            mostrarToastPOS({ texto: "✅ Descuento aplicado" });
+        },
+        onSecundario: () => {
+            item.descuento = 0;
+            item.descuentoTipo = "porcentaje";
+            actualizarRenglonPOS(idx);
+        }
+    });
+}
+
+function abrirDescuentoGlobal() {
+    mostrarModalGenerico({
+        tipo: "porcentaje",
+        titulo: "Descuento sobre toda la venta",
+        valorInicial: posDescGlobalValor || "",
+        tipoDescInicial: posDescGlobalTipo,
+        textoConfirmar: "Aplicar descuento",
+        textoSecundario: "Quitar descuento",
+        onConfirmar: (resultado) => {
+            posDescGlobalTipo = resultado.tipo;
+            posDescGlobalValor = resultado.valor;
+            actualizarResumenDescuentoGlobal();
+            recalcularTotal(); // No hace falta redibujar cada renglón
+            mostrarToastPOS({ texto: "✅ Descuento aplicado" });
+        },
+        onSecundario: () => {
+            posDescGlobalTipo = "porcentaje";
+            posDescGlobalValor = 0;
+            actualizarResumenDescuentoGlobal();
+            recalcularTotal();
+        }
+    });
+}
+
+function actualizarResumenDescuentoGlobal() {
+    const el = document.getElementById("posDescGlobalResumen");
+    if (!el) return;
+    if (posDescGlobalValor <= 0) {
+        el.innerText = "Sin descuento";
+        el.style.color = "var(--text2)";
+    } else {
+        const moneda = DB.configuracion.moneda || "CUP";
+        el.innerText = posDescGlobalTipo === "monto"
+            ? `−${posDescGlobalValor.toLocaleString("es-CU")} ${moneda}`
+            : `−${posDescGlobalValor}%`;
+        el.style.color = "var(--warn)";
+    }
+}
+
+// ── Totales ──
+function subtotalPOS() {
+    return posCarritoItems.reduce((s, item) => s + precioConDescuentoItem(item) * item.cantidad, 0);
+}
+
+function getTotalPOS() {
+    return aplicarDescuentoGlobalATotal(subtotalPOS());
 }
 
 function recalcularTotal() {
     const moneda = DB.configuracion.moneda || "CUP";
-    const descGlobal = Math.min(100, Math.max(0, Number(document.getElementById("posDescGlobal").value) || 0));
-
-    let subtotal = 0;
-    posCarritoItems.forEach(item => {
-        const precioConDesc = item.precioUnitario * (1 - item.descuento / 100);
-        subtotal += precioConDesc * item.cantidad;
-    });
-
-    const total = subtotal * (1 - descGlobal / 100);
+    const subtotal = subtotalPOS();
+    const total = aplicarDescuentoGlobalATotal(subtotal);
     const totalUnidades = posCarritoItems.reduce((s, i) => s + i.cantidad, 0);
+    const totalTexto = total.toLocaleString("es-CU") + " " + moneda;
+    const itemsTexto = totalUnidades + " producto" + (totalUnidades !== 1 ? "s" : "");
 
-    document.getElementById("posTotalAmount").innerText = total.toLocaleString("es-CU") + " " + moneda;
-    document.getElementById("posItemCount").innerText = totalUnidades + " producto" + (totalUnidades !== 1 ? "s" : "");
+    document.getElementById("posTotalAmount").innerText = totalTexto;
+    document.getElementById("posItemCount").innerText = itemsTexto;
 
-    const descEl = document.getElementById("posDescuentoGlobal");
-    if (descGlobal > 0) {
-        descEl.classList.remove("oculto");
-        document.getElementById("posDescuentoGlobalVal").innerText = descGlobal;
-    } else {
-        descEl.classList.add("oculto");
-    }
+    const barraTotalEl = document.getElementById("posBottombarTotal");
+    const barraSubEl = document.getElementById("posBottombarSub");
+    if (barraTotalEl) barraTotalEl.innerText = totalTexto;
+    if (barraSubEl) barraSubEl.innerText = itemsTexto;
 
     calcularCambio();
     calcularMixto();
 
-    // Actualizar botones de monto rápido si está en modo efectivo
-    if (posMetodoActual === "efectivo") {
-        const total = getTotalPOS();
-        const montos = generarMontosRapidos(total);
-        const botonesEl = document.getElementById("posMontosBotones");
-        if (botonesEl && total > 0) {
-            botonesEl.innerHTML = montos.map(m => `
-                <button onclick="document.getElementById('posEfectivoRecibido').value=${m};calcularCambio();"
-                    style="padding:7px 14px;border-radius:20px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:13px;font-weight:600;cursor:pointer;">
-                    ${m.toLocaleString("es-CU")}
-                </button>`).join("");
-        }
-    }
+    if (posMetodoActual === "efectivo") actualizarMontosRapidos();
 }
 
-function getTotalPOS() {
-    const descGlobal = Math.min(100, Math.max(0, Number(document.getElementById("posDescGlobal").value) || 0));
-    let subtotal = 0;
-    posCarritoItems.forEach(item => {
-        const precioConDesc = item.precioUnitario * (1 - item.descuento / 100);
-        subtotal += precioConDesc * item.cantidad;
-    });
-    return subtotal * (1 - descGlobal / 100);
-}
-
-function seleccionarMetodoPOS(btn) {
-    document.querySelectorAll(".pos-metodo").forEach(b => b.classList.remove("activo"));
-    btn.classList.add("activo");
-    posMetodoActual = btn.dataset.metodo;
-    document.getElementById("posEfectivoBloque").style.display = posMetodoActual === "efectivo" ? "block" : "none";
-    document.getElementById("posMixtoBloque").classList.toggle("oculto", posMetodoActual !== "mixto");
-    document.getElementById("posFiadoBloque").classList.toggle("oculto", posMetodoActual !== "fiado");
-
-    if (posMetodoActual === "efectivo") {
-        // Generar botones de monto rápido basados en el total actual
-        const total = getTotalPOS();
-        const montos = generarMontosRapidos(total);
-        const botonesEl = document.getElementById("posMontosBotones");
-        if (botonesEl) {
-            botonesEl.innerHTML = montos.map(m => `
-                <button onclick="document.getElementById('posEfectivoRecibido').value=${m};calcularCambio();"
-                    style="padding:7px 14px;border-radius:20px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:13px;font-weight:600;cursor:pointer;transition:0.12s;"
-                    onmousedown="this.style.background='var(--accent)';this.style.color='#0a0f0d';"
-                    onmouseup="this.style.background='var(--surface2)';this.style.color='var(--text)';">
-                    ${m.toLocaleString("es-CU")}
-                </button>`).join("");
-        }
-        document.getElementById("posEfectivoRecibido").value = "";
-        document.getElementById("posCambio").innerText = "—";
-        document.getElementById("posCambio").style.color = "var(--text3)";
+function actualizarMontosRapidos() {
+    const total = getTotalPOS();
+    const montos = generarMontosRapidos(total);
+    const botonesEl = document.getElementById("posMontosBotones");
+    if (botonesEl && total > 0) {
+        botonesEl.innerHTML = montos.map(m => `
+            <button class="pos-monto-rapido" onclick="document.getElementById('posEfectivoRecibido').value=${m};calcularCambio();">
+                ${m.toLocaleString("es-CU")}
+            </button>`).join("");
+    } else if (botonesEl) {
+        botonesEl.innerHTML = "";
     }
 }
 
 function generarMontosRapidos(total) {
     if (total === 0) return [];
-    // Genera: monto exacto + redondeos hacia arriba
     const montos = new Set();
-    montos.add(total); // Monto exacto
-    // Redondear a múltiplos convenientes
+    montos.add(Math.ceil(total)); // Monto exacto
     const redondeos = [50, 100, 200, 500, 1000];
     for (const r of redondeos) {
         const redondeado = Math.ceil(total / r) * r;
@@ -4738,6 +5138,43 @@ function generarMontosRapidos(total) {
     return [...montos].sort((a, b) => a - b).slice(0, 4);
 }
 
+// ── Panel de pago (drawer deslizable sobre la barra fija) ──
+function togglePanelPago() {
+    if (posCarritoItems.length === 0) { mostrarToastPOS({ texto: "⚠️ El carrito está vacío" }); return; }
+    const drawer = document.getElementById("posPagoDrawer");
+    const abierto = !drawer.classList.contains("oculto");
+    if (abierto) cerrarPanelPago();
+    else abrirPanelPago();
+}
+
+function abrirPanelPago() {
+    document.getElementById("posPagoDrawer").classList.remove("oculto");
+    document.getElementById("posBottombar").classList.add("pos-bottombar-arriba");
+}
+
+function cerrarPanelPago() {
+    document.getElementById("posPagoDrawer").classList.add("oculto");
+    document.getElementById("posBottombar").classList.remove("pos-bottombar-arriba");
+}
+
+function seleccionarMetodoPOS(btn) {
+    document.querySelectorAll(".pos-metodo").forEach(b => b.classList.remove("activo"));
+    btn.classList.add("activo");
+    posMetodoActual = btn.dataset.metodo;
+    document.getElementById("posEfectivoBloque").classList.toggle("oculto", posMetodoActual !== "efectivo");
+    document.getElementById("posMixtoBloque").classList.toggle("oculto", posMetodoActual !== "mixto");
+    document.getElementById("posFiadoBloque").classList.toggle("oculto", posMetodoActual !== "fiado");
+
+    if (posMetodoActual === "efectivo") {
+        actualizarMontosRapidos();
+        document.getElementById("posEfectivoRecibido").value = "";
+        document.getElementById("posCambio").innerText = "—";
+        document.getElementById("posCambio").style.color = "var(--text3)";
+    }
+}
+
+// Cambio calculado con "input" (mientras se escribe), NUNCA con "change"
+// (que solo dispara al perder el foco).
 function calcularCambio() {
     if (posMetodoActual !== "efectivo") return;
     const total = getTotalPOS();
@@ -4773,45 +5210,80 @@ function calcularMixto() {
     }
 }
 
+// ── Venta: validación (procesarVentaPOS) + ejecución (ejecutarVentaPOS) ──
+// Se separan para poder reanudar el cobro tras confirmar en el modal de
+// fiado, sin duplicar la lógica de registro (FIFO/movimientos/factura).
 function procesarVentaPOS() {
-    if (posCarritoItems.length === 0) { mostrarToast("⚠️ El carrito está vacío"); return; }
+    if (posCarritoItems.length === 0) { mostrarToastPOS({ texto: "⚠️ El carrito está vacío" }); return; }
     const total = getTotalPOS();
-    const moneda = DB.configuracion.moneda || "CUP";
 
-    // Validaciones por método
     if (posMetodoActual === "efectivo") {
         const recibido = Number(document.getElementById("posEfectivoRecibido").value) || 0;
         if (recibido > 0 && recibido < total) {
-            mostrarToast("⚠️ El monto recibido es menor al total");
+            mostrarToastPOS({ texto: "⚠️ El monto recibido es menor al total" });
             return;
         }
     }
     if (posMetodoActual === "fiado") {
         const clienteId = document.getElementById("posClienteId").value;
-        if (!clienteId) { mostrarToast("⚠️ Selecciona un cliente para venta fiada"); return; }
-        // Verificar límite de crédito
+        if (!clienteId) { mostrarToastPOS({ texto: "⚠️ Selecciona un cliente para venta fiada" }); return; }
         const cli = DB.buscarCliente(clienteId);
         if (cli && cli.limiteCredito > 0) {
             const saldo = DB.saldoCliente(clienteId);
             if (saldo + total > cli.limiteCredito) {
-                if (!confirm(`⚠️ ${cli.nombre} supera su límite de crédito. ¿Continuar?`)) return;
+                abrirConfirmFiadoPOS(cli, saldo, total);
+                return; // Se retoma en ejecutarVentaPOS() si el usuario confirma
             }
         }
     }
     if (posMetodoActual === "mixto") {
         const ef = Number(document.getElementById("posMixtoEfectivo").value) || 0;
         const tr = Number(document.getElementById("posMixtoTransferencia").value) || 0;
-        if (ef + tr < total) { mostrarToast("⚠️ El monto total no cubre la venta"); return; }
+        if (ef + tr < total) { mostrarToastPOS({ texto: "⚠️ El monto total no cubre la venta" }); return; }
     }
 
-    // Procesar cada item del carrito
-    const descGlobal = Math.min(100, Math.max(0, Number(document.getElementById("posDescGlobal").value) || 0));
+    ejecutarVentaPOS();
+}
+
+function abrirConfirmFiadoPOS(cli, saldo, total) {
+    const moneda = DB.configuracion.moneda || "CUP";
+    mostrarModalGenerico({
+        tipo: "confirmar",
+        titulo: "⚠️ Límite de crédito",
+        mensaje: `<strong>${cli.nombre}</strong> superará su límite de crédito.<br>` +
+            `Saldo actual: ${saldo.toLocaleString("es-CU")} ${moneda}<br>` +
+            `Límite: ${cli.limiteCredito.toLocaleString("es-CU")} ${moneda}<br>` +
+            `Nueva venta: ${total.toLocaleString("es-CU")} ${moneda}`,
+        textoConfirmar: "Continuar de todos modos",
+        textoSecundario: "Cancelar",
+        onConfirmar: () => ejecutarVentaPOS(),
+        onSecundario: () => {}
+    });
+}
+
+// Genera el número de factura reutilizando el contador existente en
+// DB.configuracion (proxFactura/numAuto). No crea un sistema paralelo.
+function generarNumeroFacturaPOS() {
+    const cfg = DB.configuracion;
+    const numero = cfg.proxFactura || 1;
+    if (cfg.numAuto !== false) {
+        cfg.proxFactura = numero + 1;
+        DB.guardar();
+    }
+    return numero;
+}
+
+function ejecutarVentaPOS() {
+    const total = getTotalPOS();
+    const moneda = DB.configuracion.moneda || "CUP";
     const clienteId = posMetodoActual === "fiado" ? document.getElementById("posClienteId").value : null;
     const cli = clienteId ? DB.buscarCliente(clienteId) : null;
     const fechaVenta = new Date().toISOString();
+    const numeroFactura = generarNumeroFacturaPOS();
+    const itemsFactura = [];
 
     posCarritoItems.forEach(item => {
-        const precioConDesc = item.precioUnitario * (1 - item.descuento / 100) * (1 - descGlobal / 100);
+        const precioConDesc = aplicarDescuentoGlobalATotal(precioConDescuentoItem(item));
         let costoReal = null;
 
         if (item.producto.usaFifo) {
@@ -4826,17 +5298,23 @@ function procesarVentaPOS() {
             cantidad: item.cantidad,
             precioUnitario: precioConDesc,
             costoReal,
+            factura: numeroFactura,
             metodoPago: posMetodoActual === "mixto" ? "mixto" : posMetodoActual,
             montoEfectivo: posMetodoActual === "mixto" ? (Number(document.getElementById("posMixtoEfectivo").value) || 0) : (posMetodoActual === "efectivo" ? (Number(document.getElementById("posEfectivoRecibido").value) || 0) : 0),
             montoTransferencia: posMetodoActual === "mixto" ? (Number(document.getElementById("posMixtoTransferencia").value) || 0) : 0,
             cliente: cli ? cli.nombre : "",
             clienteId,
-            nota: `Venta POS${item.descuento > 0 ? ` (desc. ${item.descuento}%)` : ""}${descGlobal > 0 ? ` (desc. global ${descGlobal}%)` : ""}`,
+            nota: `Venta POS${item.descuento > 0 ? ` (desc. ${item.descuentoTipo === "monto" ? item.descuento + " " + moneda : item.descuento + "%"})` : ""}${posDescGlobalValor > 0 ? ` (desc. global ${posDescGlobalTipo === "monto" ? posDescGlobalValor + " " + moneda : posDescGlobalValor + "%"})` : ""}`,
             fecha: fechaVenta
+        });
+
+        itemsFactura.push({
+            nombre: item.producto.nombre,
+            cantidad: item.cantidad,
+            subtotalTexto: (precioConDesc * item.cantidad).toLocaleString("es-CU") + " " + moneda
         });
     });
 
-    // Actualizar método predeterminado (excepto fiado)
     if (posMetodoActual !== "fiado") {
         DB.configuracion.metodoPagoDefault = posMetodoActual;
         DB.guardar();
@@ -4846,21 +5324,123 @@ function procesarVentaPOS() {
         ? Math.max(0, (Number(document.getElementById("posEfectivoRecibido").value) || 0) - total)
         : 0;
 
-    const msg = `✅ Venta registrada\nTotal: ${total.toLocaleString("es-CU")} ${moneda}${cambio > 0 ? `\nCambio: ${cambio.toLocaleString("es-CU")} ${moneda}` : ""}`;
-    mostrarToast(msg.split("\n")[0]);
-
     actualizarInicio();
-    abrirCajaPOS(); // Limpia y queda listo para nueva venta
+
+    mostrarFacturaPOS({
+        numeroFactura,
+        totalTexto: total.toLocaleString("es-CU") + " " + moneda,
+        cambio,
+        cambioTexto: cambio.toLocaleString("es-CU") + " " + moneda,
+        cliente: cli ? cli.nombre : "",
+        items: itemsFactura
+    });
+}
+
+// ── Pantalla de factura (tras el cobro) ──
+function mostrarFacturaPOS(datos) {
+    posUltimaVenta = datos;
+    document.getElementById("facturaPOSNumero").innerText = "#" + datos.numeroFactura;
+    document.getElementById("facturaPOSTotal").innerText = datos.totalTexto;
+
+    const cambioFila = document.getElementById("facturaPOSCambioFila");
+    if (datos.cambio > 0) {
+        cambioFila.classList.remove("oculto");
+        document.getElementById("facturaPOSCambio").innerText = datos.cambioTexto;
+    } else {
+        cambioFila.classList.add("oculto");
+    }
+
+    const clienteFila = document.getElementById("facturaPOSClienteFila");
+    if (datos.cliente) {
+        clienteFila.classList.remove("oculto");
+        document.getElementById("facturaPOSCliente").innerText = datos.cliente;
+    } else {
+        clienteFila.classList.add("oculto");
+    }
+
+    const detalleEl = document.getElementById("facturaPOSDetalle");
+    detalleEl.classList.add("oculto");
+    detalleEl.innerHTML = datos.items.map(it =>
+        `<div class="pos-factura-item"><span>${it.cantidad}× ${it.nombre}</span><strong>${it.subtotalTexto}</strong></div>`
+    ).join("");
+    document.getElementById("btnVerFacturaPOS").innerText = "Ver factura ›";
+
+    document.getElementById("pantallaFacturaPOS").classList.remove("oculto");
+}
+
+function toggleDetalleFacturaPOS() {
+    const det = document.getElementById("facturaPOSDetalle");
+    const abierto = !det.classList.contains("oculto");
+    det.classList.toggle("oculto");
+    document.getElementById("btnVerFacturaPOS").innerText = abierto ? "Ver factura ›" : "Ocultar detalle ‹";
+}
+
+function compartirFacturaPOS() {
+    if (!posUltimaVenta) return;
+    const d = posUltimaVenta;
+    const negocio = DB.configuracion.nombreNegocio || "Mi Negocio";
+    let txt = `🧾 *${negocio}*\nFactura #${d.numeroFactura}\n\n`;
+    d.items.forEach(it => { txt += `${it.cantidad}× ${it.nombre} — ${it.subtotalTexto}\n`; });
+    txt += `\nTotal: ${d.totalTexto}`;
+    if (d.cambio > 0) txt += `\nCambio: ${d.cambioTexto}`;
+    if (d.cliente) txt += `\nCliente: ${d.cliente}`;
+    txt += `\n\n_Generado con INVENTARY ARB_`;
+    window.open("https://wa.me/?text=" + encodeURIComponent(txt), "_blank");
+}
+
+function cerrarFacturaPOSyNuevaVenta() {
+    document.getElementById("pantallaFacturaPOS").classList.add("oculto");
+    abrirCajaPOS();
+}
+
+// ── Toast enriquecido específico del POS (producto, cantidad, total, animación) ──
+function mostrarToastPOS({ texto, producto, cantidad, subtotal, accion } = {}) {
+    let toast = document.getElementById("posToast");
+    if (!toast) {
+        toast = document.createElement("div");
+        toast.id = "posToast";
+        toast.className = "pos-toast";
+        document.body.appendChild(toast);
+    }
+
+    const moneda = DB.configuracion.moneda || "CUP";
+    if (producto) {
+        toast.innerHTML = `
+            <div class="pos-toast-icono">🛒</div>
+            <div class="pos-toast-cuerpo">
+                <div class="pos-toast-titulo">${producto}</div>
+                <div class="pos-toast-detalle">Cant. ${cantidad} · ${subtotal.toLocaleString("es-CU")} ${moneda}</div>
+            </div>`;
+    } else {
+        toast.innerHTML = `
+            <div class="pos-toast-cuerpo">
+                <div class="pos-toast-titulo">${texto}</div>
+            </div>
+            ${accion ? `<button class="pos-toast-accion" onclick="${accion.fn}; ocultarToastPOS();">${accion.texto}</button>` : ""}`;
+    }
+
+    toast.classList.add("visible");
+    clearTimeout(toast._timeout);
+    toast._timeout = setTimeout(() => ocultarToastPOS(), accion ? 4000 : 2200);
+}
+
+function ocultarToastPOS() {
+    const toast = document.getElementById("posToast");
+    if (toast) toast.classList.remove("visible");
 }
 
 // ── Cierre de Caja ──
+
+
 function renderCierreCaja() {
-    const hoy = new Date();
-    const inicio = new Date(hoy); inicio.setHours(0,0,0,0);
-    const fin = new Date(hoy); fin.setHours(23,59,59,999);
+    const sel = document.getElementById("cierreFechaSelector");
+    const fechaStr = sel ? sel.value : new Date().toISOString().slice(0, 10);
+    const fecha = fechaStr ? new Date(fechaStr + "T00:00:00") : new Date();
+    const inicio = new Date(fecha); inicio.setHours(0, 0, 0, 0);
+    const fin = new Date(fecha); fin.setHours(23, 59, 59, 999);
     const moneda = DB.configuracion.moneda || "CUP";
 
-    document.getElementById("cierreFecha").innerText = hoy.toLocaleDateString("es-CU", { weekday:"long", day:"numeric", month:"long" });
+    document.getElementById("cierreFecha").innerText = fecha.toLocaleDateString("es-CU", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 
     const ventasHoy = DB.movimientos.filter(m =>
         m.tipo === "salida" && new Date(m.fecha) >= inicio && new Date(m.fecha) <= fin
@@ -4910,7 +5490,7 @@ function renderCierreCaja() {
     const top = Object.values(porProducto).sort((a,b) => b.total-a.total).slice(0,5);
     const topEl = document.getElementById("cierreTopProductos");
     topEl.innerHTML = top.length === 0
-        ? `<div class="cfg-row" style="cursor:default;"><div class="cfg-row-body"><span class="cfg-row-sub">Sin ventas registradas hoy</span></div></div>`
+        ? `<div class="cfg-row" style="cursor:default;"><div class="cfg-row-body"><span class="cfg-row-sub">Sin ventas en esta fecha</span></div></div>`
         : top.map((p,i) => `
             <div class="cfg-row" style="cursor:default;">
                 <div class="cfg-row-body"><span class="cfg-row-titulo">${p.nombre}</span><span class="cfg-row-sub">${p.cantidad} unidades</span></div>

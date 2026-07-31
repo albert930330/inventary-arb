@@ -1698,3 +1698,153 @@ textarea { height: 80px; resize: none; }
 }
 #btnCobrarPOS:active { transform: scale(0.97); }
 
+/* ── POS 3.0: toolbar de búsqueda/escaneo ── */
+.pos-toolbar { display: flex; gap: 8px; padding: 10px 16px 6px; }
+.pos-toolbar-btn {
+  flex: 1; padding: 13px; border-radius: 14px; border: 1px solid var(--border);
+  background: var(--surface2); color: var(--text2); font-size: 14px; font-weight: 600;
+  cursor: pointer; text-align: left; transition: 0.15s;
+}
+.pos-toolbar-btn:active { border-color: var(--accent); background: rgba(0,232,150,0.06); transform: scale(0.98); }
+.pos-toolbar-scan {
+  width: 48px; height: 48px; flex-shrink: 0; border-radius: 14px; border: 1px solid rgba(0,232,150,0.25);
+  background: rgba(0,232,150,0.08); color: var(--accent); font-size: 20px; cursor: pointer; transition: 0.15s;
+}
+.pos-toolbar-scan:active { transform: scale(0.9); background: rgba(0,232,150,0.18); }
+
+.pos-carrito-lista { padding: 6px 16px 0; display: flex; flex-direction: column; gap: 8px; min-height: 60px; }
+
+/* Input de cantidad editable (seleccionar todo al tocar) */
+.pos-qty-input {
+  width: 44px; height: 30px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--surface2); color: var(--text); font-family: 'Syne', Arial, sans-serif;
+  font-size: 15px; font-weight: 700; text-align: center; -moz-appearance: textfield;
+}
+.pos-qty-input::-webkit-outer-spin-button, .pos-qty-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.pos-qty-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px rgba(0,232,150,0.15); }
+
+/* Descuento sobre toda la venta */
+.pos-desc-global-row {
+  margin: 10px 16px 0; padding: 12px 14px; border-radius: 12px; border: 1px dashed rgba(0,232,150,0.25);
+  background: var(--surface); display: flex; justify-content: space-between; align-items: center;
+  font-size: 13px; color: var(--text); cursor: pointer; transition: 0.15s;
+}
+.pos-desc-global-row:active { background: rgba(0,232,150,0.05); }
+
+/* Barra fija inferior (siempre visible, por encima del bottom-nav) */
+.pos-bottombar {
+  position: fixed; left: 0; right: 0; bottom: 78px; z-index: 150;
+  background: var(--surface); border-top: 1px solid var(--border);
+  box-shadow: 0 -8px 24px rgba(0,0,0,0.3);
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; gap: 12px; transition: 0.2s;
+}
+.pos-bottombar-resumen { display: flex; flex-direction: column; gap: 2px; cursor: pointer; }
+.pos-bottombar-sub { font-size: 11px; color: var(--text2); }
+.pos-bottombar-total { font-family: 'Syne', Arial, sans-serif; font-size: 20px; font-weight: 800; color: var(--accent); }
+.pos-bottombar-btn {
+  padding: 14px 24px; border-radius: 14px; border: none;
+  background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #0a0f0d;
+  font-size: 15px; font-weight: 800; font-family: 'Syne', Arial, sans-serif;
+  cursor: pointer; transition: 0.15s; box-shadow: 0 6px 18px rgba(0,232,150,0.3);
+}
+.pos-bottombar-btn:active { transform: scale(0.96); }
+
+/* Panel de pago deslizable (drawer) */
+.pos-pago-drawer {
+  position: fixed; left: 0; right: 0; bottom: 78px; z-index: 149;
+  background: var(--surface); border-top: 1px solid var(--border);
+  border-radius: 20px 20px 0 0; padding: 14px 16px calc(84px + 10px);
+  box-shadow: 0 -12px 30px rgba(0,0,0,0.4);
+  max-height: 78vh; overflow-y: auto;
+  animation: posDrawerSubir 0.22s ease;
+}
+@keyframes posDrawerSubir { from { transform: translateY(16px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+.pos-pago-handle { width: 40px; height: 4px; border-radius: 4px; background: var(--border); margin: 0 auto 14px; cursor: pointer; }
+
+/* Tipos de descuento (modal) */
+.pos-desc-tipos { display: flex; gap: 8px; margin-top: 4px; }
+.pos-desc-tipo {
+  flex: 1; padding: 11px; border-radius: 12px; border: 1.5px solid var(--border);
+  background: var(--surface2); color: var(--text2); font-size: 13px; font-weight: 600; cursor: pointer; transition: 0.15s;
+}
+.pos-desc-tipo.activo { border-color: var(--accent); background: rgba(0,232,150,0.12); color: var(--accent); }
+
+/* Botones rápidos de monto (efectivo) */
+.pos-monto-rapido {
+  padding: 7px 14px; border-radius: 20px; border: 1px solid var(--border);
+  background: var(--surface2); color: var(--text); font-size: 13px; font-weight: 600; cursor: pointer; transition: 0.12s;
+}
+.pos-monto-rapido:active { background: var(--accent); color: #0a0f0d; transform: scale(0.94); }
+
+/* Toast enriquecido del POS */
+.pos-toast {
+  position: fixed; bottom: 168px; left: 16px; right: 16px; z-index: 5000;
+  background: var(--surface); border: 1px solid var(--accent); border-radius: 16px;
+  padding: 12px 14px; display: flex; align-items: center; gap: 10px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+  opacity: 0; transform: translateY(14px); pointer-events: none; transition: 0.22s ease;
+}
+.pos-toast.visible { opacity: 1; transform: translateY(0); pointer-events: auto; }
+.pos-toast-icono { font-size: 22px; flex-shrink: 0; }
+.pos-toast-cuerpo { flex: 1; min-width: 0; }
+.pos-toast-titulo { font-size: 14px; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pos-toast-detalle { font-size: 12px; color: var(--accent); margin-top: 1px; }
+.pos-toast-accion {
+  flex-shrink: 0; padding: 7px 12px; border-radius: 10px; border: 1px solid var(--accent);
+  background: rgba(0,232,150,0.1); color: var(--accent); font-size: 12px; font-weight: 700; cursor: pointer;
+}
+
+/* ── POS 3.1: animaciones de entrada/salida del carrito ── */
+.pos-item-entrando { animation: posItemEntrar 0.2s ease; }
+@keyframes posItemEntrar { from { opacity: 0; transform: translateY(8px) scale(0.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
+.pos-item-saliendo { animation: posItemSalir 0.16s ease forwards; }
+@keyframes posItemSalir { to { opacity: 0; transform: scale(0.92) translateX(30px); } }
+
+/* Metadatos de cada renglón: stock disponible, unidad, escala */
+.pos-item-meta { font-size: 10px; color: var(--text3); margin: 1px 0; }
+
+/* ── Sugerencias: favoritos (más vendidos) y recientes ── */
+.pos-sugerencias { padding: 2px 16px 4px; }
+.pos-sugerencias-titulo { font-size: 11px; font-weight: 700; color: var(--text2); margin: 8px 0 6px; letter-spacing: 0.3px; }
+.pos-sugerencias-fila { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; }
+.pos-sugerencias-fila::-webkit-scrollbar { display: none; }
+.pos-sugerencia-chip {
+  flex-shrink: 0; padding: 9px 14px; border-radius: 20px; border: 1px solid var(--border);
+  background: var(--surface2); color: var(--text); font-size: 12px; font-weight: 600; cursor: pointer;
+  white-space: nowrap; transition: 0.15s;
+}
+.pos-sugerencia-chip:active { background: var(--accent); color: #0a0f0d; transform: scale(0.95); border-color: var(--accent); }
+
+/* ── Pantalla de factura tras el cobro ── */
+.pos-factura-contenido { text-align: center; max-height: 82vh; }
+.pos-factura-check { font-size: 52px; animation: posCheckPop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1); }
+@keyframes posCheckPop { from { transform: scale(0); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+.pos-factura-titulo { font-size: 19px; margin: 6px 0 18px; color: var(--text); }
+.pos-factura-datos { text-align: left; background: var(--surface2); border-radius: 14px; padding: 4px 14px; margin-bottom: 12px; }
+.pos-factura-fila { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; font-size: 13px; color: var(--text2); border-bottom: 1px solid var(--border); }
+.pos-factura-fila:last-child { border-bottom: none; }
+.pos-factura-fila strong { font-family: 'Syne', Arial, sans-serif; color: var(--text); font-size: 15px; }
+.pos-factura-vertoggle { width: 100%; padding: 10px; background: none; border: none; color: var(--accent); font-size: 13px; font-weight: 600; cursor: pointer; }
+.pos-factura-detalle { text-align: left; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 8px 12px; margin-bottom: 10px; max-height: 180px; overflow-y: auto; }
+.pos-factura-item { display: flex; justify-content: space-between; font-size: 12px; color: var(--text2); padding: 5px 0; }
+.pos-factura-acciones { display: flex; gap: 8px; margin: 8px 0 10px; }
+.pos-factura-btn-secundario {
+  flex: 1; padding: 12px; border-radius: 12px; border: 1px solid var(--border);
+  background: var(--surface2); color: var(--text); font-size: 13px; font-weight: 600; cursor: pointer; transition: 0.15s;
+}
+.pos-factura-btn-secundario:active { transform: scale(0.96); background: rgba(0,232,150,0.06); }
+.pos-factura-btn-principal {
+  width: 100%; padding: 16px; border-radius: 14px; border: none;
+  background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #0a0f0d;
+  font-size: 15px; font-weight: 800; font-family: 'Syne', Arial, sans-serif; cursor: pointer; transition: 0.15s;
+}
+.pos-factura-btn-principal:active { transform: scale(0.97); }
+
+/* ── Modal genérico reutilizable ── */
+#mgInput {
+  width: 100%; padding: 12px; border-radius: 12px; border: 1px solid var(--border);
+  background: var(--surface2); color: var(--text); font-size: 16px; margin-top: 10px; box-sizing: border-box;
+}
+#mgInput:focus { outline: none; border-color: var(--accent); }
+
