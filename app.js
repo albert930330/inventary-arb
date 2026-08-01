@@ -830,6 +830,37 @@ function mgSecundario() {
 // ═══════════════════════════════════════════════
 // INICIO
 // ═══════════════════════════════════════════════
+// Resumen "Hoy" del Inicio — reutiliza exactamente los mismos datos ya
+// calculados en Cierre de Caja/Reportes (movimientos con costoReal FIFO
+// congelado y DB.saldoCliente). No crea ninguna lógica financiera nueva.
+function renderResumenHoy() {
+    const cont = document.getElementById("resumenHoyCard");
+    if (!cont) return;
+    const moneda = DB.configuracion.moneda || "CUP";
+
+    const hoy = new Date();
+    const inicioHoy = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate(), 0, 0, 0);
+    const finHoy = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate(), 23, 59, 59);
+
+    const ventasHoyMov = DB.movimientos.filter(m => {
+        if (m.tipo !== "salida") return false;
+        const f = new Date(m.fecha);
+        return f >= inicioHoy && f <= finHoy;
+    });
+
+    const totalVentas = ventasHoyMov.reduce((s, m) => s + (m.precioUnitario || 0) * (m.cantidad || 0), 0);
+    const totalGanancia = ventasHoyMov.reduce((s, m) => s + ((m.precioUnitario || 0) - (typeof m.costoReal === "number" ? m.costoReal : 0)) * (m.cantidad || 0), 0);
+    const totalUnidades = ventasHoyMov.reduce((s, m) => s + (m.cantidad || 0), 0);
+    const margen = totalVentas > 0 ? Math.round((totalGanancia / totalVentas) * 100) : 0;
+    const totalFiados = DB.clientes.reduce((s, c) => s + DB.saldoCliente(c.id), 0);
+
+    document.getElementById("resumenHoyVentas").innerText = totalVentas.toLocaleString("es-CU") + " " + moneda;
+    document.getElementById("resumenHoyGanancia").innerText = totalGanancia.toLocaleString("es-CU") + " " + moneda;
+    document.getElementById("resumenHoyMargen").innerText = margen + "%";
+    document.getElementById("resumenHoyUnidades").innerText = totalUnidades;
+    document.getElementById("resumenHoyFiados").innerText = totalFiados.toLocaleString("es-CU") + " " + moneda;
+}
+
 function actualizarInicio() {
     const est = DB.estadisticas();
     const cfg = DB.configuracion;
@@ -858,6 +889,8 @@ function actualizarInicio() {
     const alertaEl = document.getElementById("heroAlerta");
     if (est.stockBajo > 0) { alertaEl.style.display = "flex"; document.getElementById("heroStockBajo").innerText = est.stockBajo; }
     else alertaEl.style.display = "none";
+
+    renderResumenHoy();
 
     // ── Puntuación de salud del negocio ──
     let puntaje = 0;
@@ -5531,3 +5564,38 @@ function exportarCierrePDF() {
     add("Ganancia neta:", document.getElementById("cierreGanancia").innerText);
     doc.save(`cierre-caja-${new Date().toISOString().slice(0,10)}.pdf`);
 }
+
+// ═══════════════════════════════════════════════
+// PWA: registro del service worker (instalación en Android/iOS)
+// ═══════════════════════════════════════════════
+// Puramente aditivo: si el navegador no lo soporta o falla el registro,
+// la app sigue funcionando exactamente igual que hasta ahora.
+if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+        navigator.serviceWorker.register("sw.js").catch(() => {});
+    });
+}
+
+let promptInstalacionPWA = null;
+
+window.addEventListener("beforeinstallprompt", (evento) => {
+    evento.preventDefault();
+    promptInstalacionPWA = evento;
+    const bloque = document.getElementById("bloqueInstalarPWA");
+    if (bloque) bloque.classList.remove("oculto");
+});
+
+function instalarPWA() {
+    if (!promptInstalacionPWA) return;
+    promptInstalacionPWA.prompt();
+    promptInstalacionPWA.userChoice.finally(() => {
+        promptInstalacionPWA = null;
+        const bloque = document.getElementById("bloqueInstalarPWA");
+        if (bloque) bloque.classList.add("oculto");
+    });
+}
+
+window.addEventListener("appinstalled", () => {
+    const bloque = document.getElementById("bloqueInstalarPWA");
+    if (bloque) bloque.classList.add("oculto");
+});

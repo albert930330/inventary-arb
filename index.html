@@ -4,6 +4,16 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>INVENTARY ARB</title>
+
+<!-- PWA -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0a0f0d">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="INVENTARY ARB">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css?v=20260731b">
 </head>
@@ -73,6 +83,16 @@
       <div class="mini-value" id="statStock">0</div>
       <div class="mini-label">Stock bajo</div>
     </div>
+  </div>
+
+  <!-- Resumen de Hoy (usa datos ya calculados en Cierre/Reportes) -->
+  <div class="resumen-hoy-card" id="resumenHoyCard">
+    <div class="resumen-hoy-titulo">RESUMEN DE HOY</div>
+    <div class="resumen-hoy-fila"><span>Ventas</span><strong id="resumenHoyVentas">0 CUP</strong></div>
+    <div class="resumen-hoy-fila"><span>Ganancia</span><strong id="resumenHoyGanancia" style="color:var(--accent);">0 CUP</strong></div>
+    <div class="resumen-hoy-fila"><span>Margen</span><strong id="resumenHoyMargen">0%</strong></div>
+    <div class="resumen-hoy-fila"><span>Productos vendidos</span><strong id="resumenHoyUnidades">0</strong></div>
+    <div class="resumen-hoy-fila"><span>Fiados por cobrar</span><strong id="resumenHoyFiados" style="color:var(--warn);">0 CUP</strong></div>
   </div>
 
   <!-- Módulos -->
@@ -945,6 +965,7 @@
       <div class="dashfin-sep"></div>
       <div class="dashfin-row dashfin-total"><span>= Resultado neto</span><strong id="onatResultadoNeto">0 CUP</strong></div>
     </div>
+    <div class="onat-disclaimer">ℹ️ Cálculo estimado por INVENTARY ARB a partir de tus datos. No constituye una declaración fiscal oficial. Verifica tus obligaciones tributarias con ONAT o un profesional en la materia.</div>
 
     <!-- Próximos vencimientos -->
     <div class="cfg-grupo-label">PRÓXIMOS VENCIMIENTOS</div>
@@ -1078,7 +1099,8 @@
   <div class="cfg-grupo-label">RESULTADO ESTIMADO</div>
   <div id="simResultado" class="dashfin-cascada" style="margin:0 20px 14px;"></div>
   <div class="cfg-grupo-label">DESGLOSE POR TRIBUTO</div>
-  <div id="simDetalle" class="cfg-grupo" style="margin:0 20px 100px;"></div>
+  <div id="simDetalle" class="cfg-grupo" style="margin:0 20px 14px;"></div>
+  <div class="onat-disclaimer" style="margin:0 20px 100px;">ℹ️ Simulación estimada por INVENTARY ARB. No constituye una declaración fiscal oficial. Verifica tus obligaciones tributarias con ONAT o un profesional en la materia.</div>
 </div>
 
 <!-- PANTALLA: REPORTES                              -->
@@ -2294,6 +2316,9 @@
       <div class="cfg-about-logo-big">INVENTARY ARB</div>
       <div class="cfg-about-v">Versión 1.0.0 · Build 001</div>
       <div class="cfg-about-desc2">Control de inventario profesional para negocios cubanos con módulo ONAT/TCP integrado.</div>
+    </div>
+    <div id="bloqueInstalarPWA" class="oculto" style="padding:0 20px 14px;">
+      <button class="alm-btn-transferir" onclick="instalarPWA()" style="border-color:rgba(0,232,150,0.4);background:rgba(0,232,150,0.1);">📲 Instalar INVENTARY ARB en el teléfono</button>
     </div>
     <div class="cfg-grupo">
       <div class="cfg-row"><div class="cfg-row-body"><span class="cfg-row-titulo">📦 Inventario</span><span class="cfg-row-sub">Gestión completa de productos y stock</span></div></div>

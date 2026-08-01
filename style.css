@@ -60,6 +60,13 @@ body {
 .mini-stats { position: relative; z-index: 1; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; padding: 0 20px; }
 .mini-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px 10px; text-align: center; cursor: pointer; transition: 0.2s; }
 .mini-card:active { transform: scale(0.96); }
+
+/* ── Resumen de Hoy (mini-dashboard, Inicio) ── */
+.resumen-hoy-card { margin: 14px 20px 4px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 4px 16px; }
+.resumen-hoy-titulo { font-size: 11px; font-weight: 700; color: var(--text2); letter-spacing: 0.5px; padding: 12px 0 4px; }
+.resumen-hoy-fila { display: flex; justify-content: space-between; align-items: center; padding: 9px 0; font-size: 13px; color: var(--text2); border-bottom: 1px solid var(--border); }
+.resumen-hoy-fila:last-child { border-bottom: none; }
+.resumen-hoy-fila strong { font-family: 'Syne', Arial, sans-serif; color: var(--text); font-size: 14px; }
 .mini-icon { font-size: 20px; display: block; margin-bottom: 5px; }
 .mini-value { font-family: 'Syne', Arial, sans-serif; font-size: 16px; font-weight: 700; line-height: 1; }
 .mini-label { font-size: 10px; color: var(--text2); margin-top: 3px; }
@@ -371,6 +378,12 @@ textarea { height: 80px; resize: none; }
   font-size: 11px; font-weight: 700; letter-spacing: 1px;
   text-transform: uppercase; color: var(--text2);
   padding: 14px 8px 8px;
+}
+
+.onat-disclaimer {
+  margin: 4px 20px 14px; padding: 12px 14px; border-radius: 12px;
+  border: 1px solid rgba(255,193,7,0.25); background: rgba(255,193,7,0.06);
+  font-size: 11.5px; line-height: 1.5; color: var(--text2);
 }
 
 /* Grupo contenedor (lista agrupada estilo iOS) */
