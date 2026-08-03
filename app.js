@@ -396,7 +396,7 @@ const ICONOS = {
     "Alimentos":"🍎","Bebidas":"🧃","Limpieza":"🧴",
     "Higiene personal":"🪥","Ropa y calzado":"👟",
     "Electrónica":"📱","Ferretería":"🔧","Medicamentos":"💊",
-    "Materia prima":"📦","Otro":"🏷️"
+    "Confitura":"🍬","Otro":"🏷️"
 };
 
 const EMOJIS_NEGOCIO = ["🏪","🏬","🛒","🍽️","💈","🧴","👗","🔧","💊","🍞",
