@@ -15,7 +15,7 @@
 <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
 
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260731b">
+<link rel="stylesheet" href="style.css?v=20260802">
 </head>
 <body>
 
@@ -174,8 +174,8 @@
   <div class="toolbar">
     <input type="text" id="buscar" placeholder="🔍 Buscar producto...">
     <div class="toolbar-botones">
-      <button id="btnVistaTarjeta" class="btn-tool activo" onclick="cambiarVista('tarjeta')">⊞</button>
-      <button id="btnVistaLista" class="btn-tool" onclick="cambiarVista('lista')">☰</button>
+      <button id="btnVistaTarjeta" class="btn-tool" onclick="cambiarVista('tarjeta')">⊞</button>
+      <button id="btnVistaLista" class="btn-tool activo" onclick="cambiarVista('lista')">☰</button>
       <select id="ordenar" class="select-tool" onchange="mostrarInventario()">
         <option value="nombre">A–Z</option>
         <option value="cantidad">Cantidad</option>
@@ -205,6 +205,18 @@
     <h2 id="modalTitulo">📦 Nuevo Producto</h2>
     <button class="btn-cerrar" onclick="cerrarModalProducto()">✕</button>
   </div>
+  <div class="foto-picker-wrap">
+    <div id="fotoProductoBox" class="foto-picker-box" onclick="document.getElementById('fotoProductoInput').click()">
+      <span id="fotoProductoPlaceholder" class="foto-picker-placeholder">📷</span>
+      <img id="fotoProductoPreview" class="foto-picker-preview oculto">
+    </div>
+  </div>
+  <div id="fotoProductoAcciones" class="foto-picker-acciones oculto">
+    <button type="button" class="foto-picker-btn foto-picker-btn-cambiar" onclick="document.getElementById('fotoProductoInput').click()">✏️ Cambiar foto</button>
+    <button type="button" class="foto-picker-btn foto-picker-btn-quitar" onclick="quitarFotoProducto()">🗑️ Quitar foto</button>
+  </div>
+  <input type="file" id="fotoProductoInput" accept="image/*" style="display:none">
+
   <label>Nombre del producto *</label>
   <input type="text" id="nombre" placeholder="Ej: Aceite vegetal">
   <label>Código de barras</label>
@@ -2459,7 +2471,7 @@
   <div class="sheet-contenido sheet-acciones-contenido">
     <div class="sheet-handle"></div>
     <div class="sa-header">
-      <div class="sa-icono" id="saIcono">📦</div>
+      <div class="sa-icono" id="saIcono"><span id="saIconoEmoji">📦</span><img id="saFoto" class="oculto"></div>
       <div class="sa-info"><h3 id="saNombre">—</h3><div class="sa-meta"><span id="saStock">—</span><span class="sa-sep">·</span><span id="saUbicacion">—</span></div></div>
       <button class="btn-cerrar" onclick="cerrarSheetAcciones()">✕</button>
     </div>

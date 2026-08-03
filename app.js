@@ -16,7 +16,7 @@ const DB = {
             nombreNegocio: "Mi Negocio", emoji: "🏪", propietario: "",
             telefono: "", direccion: "", municipio: "", provincia: "",
             regimenFiscal: "TCP", numONAT: "", actividad: "", piePagina: "",
-            moneda: "CUP", stockMinimo: 5, alertasStock: true, vistaLista: false,
+            moneda: "CUP", stockMinimo: 5, alertasStock: true, vistaLista: true,
             mostrarAgotados: true, alertaVencimiento: true, agruparCategoria: false,
             metodoPagoDefault: "efectivo", ventasSinStock: false, solicitarCliente: false,
             numAuto: true, proxFactura: 1,
@@ -82,18 +82,22 @@ const DB = {
     },
 
     estadisticas() {
-        let capital = 0, valorVenta = 0, stockBajo = 0;
+        let capital = 0, valorVenta = 0;
         this.productos.forEach(p => {
             capital += (p.compra || 0) * (p.cantidad || 0);
             valorVenta += (p.venta || 0) * (p.cantidad || 0);
-            if (p.cantidad <= p.stockMinimo) stockBajo++;
         });
+        // Stock bajo = total del producto (sumando todas las ubicaciones) en o bajo el mínimo → hay que comprar.
+        // Si el total está bien pero una ubicación puntual está baja, eso es "reposicionesInternas" (hay que transferir, no comprar).
+        const alertasStock = calcularAlertasStock();
+        const stockBajo = alertasStock.compras.length;
+        const reposicionesInternas = alertasStock.reposiciones.length;
         const ganancia = valorVenta - capital;
         const margen = capital > 0 ? Math.round((ganancia / capital) * 100) : 0;
         const inicioMes = new Date(); inicioMes.setDate(1); inicioMes.setHours(0,0,0,0);
         const movMes = this.movimientos.filter(m => new Date(m.fecha) >= inicioMes);
         return {
-            capital, valorVenta, ganancia, margen, stockBajo,
+            capital, valorVenta, ganancia, margen, stockBajo, reposicionesInternas,
             entradasMes: movMes.filter(m => m.tipo === "entrada").length,
             salidasMes: movMes.filter(m => m.tipo === "salida").length
         };
@@ -247,8 +251,101 @@ const DB = {
 // ═══════════════════════════════════════════════
 // ESTADO
 // ═══════════════════════════════════════════════
+// ═══════════════════════════════════════════════
+// FOTOS DE PRODUCTOS — IndexedDB (offline, alta capacidad)
+// ═══════════════════════════════════════════════
+const FotoDB = {
+    _db: null,
+    abrir() {
+        if (this._db) return Promise.resolve(this._db);
+        return new Promise((resolve, reject) => {
+            const req = indexedDB.open("InventaryARB_Fotos", 1);
+            req.onupgradeneeded = (e) => {
+                const db = e.target.result;
+                if (!db.objectStoreNames.contains("fotos")) db.createObjectStore("fotos");
+            };
+            req.onsuccess = (e) => { this._db = e.target.result; resolve(this._db); };
+            req.onerror = () => reject(req.error);
+        });
+    },
+    async guardar(id, blob) {
+        const db = await this.abrir();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction("fotos", "readwrite");
+            tx.objectStore("fotos").put(blob, id);
+            tx.oncomplete = () => resolve(true);
+            tx.onerror = () => reject(tx.error);
+        });
+    },
+    async obtener(id) {
+        if (!id) return null;
+        const db = await this.abrir();
+        return new Promise((resolve) => {
+            const tx = db.transaction("fotos", "readonly");
+            const req = tx.objectStore("fotos").get(id);
+            req.onsuccess = () => resolve(req.result || null);
+            req.onerror = () => resolve(null);
+        });
+    },
+    async eliminar(id) {
+        if (!id) return;
+        const db = await this.abrir();
+        return new Promise((resolve) => {
+            const tx = db.transaction("fotos", "readwrite");
+            tx.objectStore("fotos").delete(id);
+            tx.oncomplete = () => resolve(true);
+            tx.onerror = () => resolve(false);
+        });
+    }
+};
+
+// Redimensiona y comprime una imagen seleccionada antes de guardarla (máx 500x500, JPEG ~0.72)
+function comprimirImagen(file, maxSize = 500, calidad = 0.72) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        const url = URL.createObjectURL(file);
+        img.onload = () => {
+            let { width, height } = img;
+            if (width > height && width > maxSize) { height = Math.round(height * (maxSize / width)); width = maxSize; }
+            else if (height > maxSize) { width = Math.round(width * (maxSize / height)); height = maxSize; }
+            const canvas = document.createElement("canvas");
+            canvas.width = width; canvas.height = height;
+            const ctx = canvas.getContext("2d");
+            ctx.drawImage(img, 0, 0, width, height);
+            URL.revokeObjectURL(url);
+            canvas.toBlob((blob) => { blob ? resolve(blob) : reject(new Error("No se pudo comprimir la imagen")); }, "image/jpeg", calidad);
+        };
+        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("No se pudo leer la imagen")); };
+        img.src = url;
+    });
+}
+
+// Caché de URLs de objeto ya generadas (fotoId -> objectURL) para no releer IndexedDB innecesariamente
+const _fotoURLCache = {};
+async function urlFoto(fotoId) {
+    if (!fotoId) return null;
+    if (_fotoURLCache[fotoId]) return _fotoURLCache[fotoId];
+    const blob = await FotoDB.obtener(fotoId);
+    if (!blob) return null;
+    const url = URL.createObjectURL(blob);
+    _fotoURLCache[fotoId] = url;
+    return url;
+}
+
+// Busca en el DOM todas las miniaturas pendientes (data-foto-id) y las carga de forma perezosa
+function cargarFotosVisibles(contenedor) {
+    const raiz = contenedor || document;
+    const imgs = raiz.querySelectorAll("img[data-foto-id]:not([data-cargada])");
+    imgs.forEach(async (img) => {
+        img.setAttribute("data-cargada", "1");
+        const fotoId = img.getAttribute("data-foto-id");
+        const url = await urlFoto(fotoId);
+        if (url) { img.src = url; img.classList.add("foto-lista"); }
+    });
+}
+
 let editandoId = null;
-let vistaActual = "tarjeta";
+let vistaActual = "lista";
 let soloStockBajo = false;
 let agruparPorCategoria = false;
 let tipoMovActual = "entrada";
@@ -266,6 +363,9 @@ let almacenActualId = null;
 let tabAlmacenActual = "productos";
 let editandoAlmacenId = null;
 let escalasTemp = [];
+let fotoTempBlob = null;      // Blob comprimido pendiente de guardar (foto nueva o cambiada)
+let fotoActualId = null;      // fotoId ya guardado en IndexedDB para el producto en edición
+let fotoEliminar = false;     // true si el usuario quitó la foto explícitamente
 let editandoGastoId = null;
 let periodoDashFin = "mes";
 let clienteActualId = null;
@@ -945,7 +1045,10 @@ function actualizarInicio() {
 
     // 🟠 IMPORTANTES
     if (est.stockBajo > 0)
-        alertas.push({ nivel: "naranja", icono: "⚠️", modulo: "Inventario", msg: `${est.stockBajo} producto${est.stockBajo>1?"s":""} con stock bajo`, accionNombre: "abrirInventario" });
+        alertas.push({ nivel: "naranja", icono: "⚠️", modulo: "Inventario", msg: `${est.stockBajo} producto${est.stockBajo>1?"s":""} con stock bajo en todo el negocio`, accionNombre: "abrirInventario" });
+
+    if (est.reposicionesInternas > 0)
+        alertas.push({ nivel: "naranja", icono: "🔄", modulo: "Inventario", msg: `${est.reposicionesInternas} producto${est.reposicionesInternas>1?"s":""} necesita${est.reposicionesInternas>1?"n":""} reposición interna (transferir, no comprar)`, accionNombre: "abrirReposicionesInternas" });
 
     // Próximos vencimientos ONAT (≤5 días) — agrupados por días restantes
     const proxONATGrupos = {};
@@ -1140,6 +1243,34 @@ function cerrarModalProducto() {
     limpiarFormulario();
 }
 
+document.getElementById("fotoProductoInput").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { alert("⚠️ Selecciona un archivo de imagen válido."); return; }
+    try {
+        const blobComprimido = await comprimirImagen(file);
+        fotoTempBlob = blobComprimido;
+        fotoEliminar = false;
+        const preview = document.getElementById("fotoProductoPreview");
+        preview.src = URL.createObjectURL(blobComprimido);
+        preview.classList.remove("oculto");
+        document.getElementById("fotoProductoPlaceholder").classList.add("oculto");
+        document.getElementById("fotoProductoAcciones").classList.remove("oculto");
+    } catch (err) {
+        alert("⚠️ No se pudo procesar la imagen. Intenta con otra foto.");
+    }
+});
+
+function quitarFotoProducto() {
+    fotoTempBlob = null;
+    fotoEliminar = true;
+    const preview = document.getElementById("fotoProductoPreview");
+    preview.src = ""; preview.classList.add("oculto");
+    document.getElementById("fotoProductoPlaceholder").classList.remove("oculto");
+    document.getElementById("fotoProductoAcciones").classList.add("oculto");
+}
+
 document.getElementById("btnMasDetalles").addEventListener("click", () => {
     const sec = document.getElementById("masDetalles");
     const btn = document.getElementById("btnMasDetalles");
@@ -1213,7 +1344,85 @@ function escalaAplicable(producto, cantidad) {
     return validas.length > 0 ? validas[0] : null;
 }
 
-document.getElementById("guardarProducto").addEventListener("click", () => {
+// ═══════════════════════════════════════════════
+// AVISO DE PRODUCTO DUPLICADO EN OTRO ALMACÉN
+// ═══════════════════════════════════════════════
+// Busca el mismo nombre de producto (normalizado) en almacenes distintos al indicado
+function buscarDuplicadosProducto(nombre, almacenExcluir) {
+    const nombreNorm = nombre.trim().toLowerCase();
+    return DB.productos.filter(p =>
+        p.nombre.trim().toLowerCase() === nombreNorm && p.almacen !== almacenExcluir
+    );
+}
+
+// Crea y guarda el producto nuevo (lo que antes vivía directo dentro del click de guardarProducto)
+function procederCrearProductoNuevo(producto) {
+    producto.usaFifo = true;
+    producto.lotes = [{
+        id: "lote_" + Date.now(),
+        cantidad: producto.cantidad,
+        costo: producto.compra,
+        fecha: new Date().toISOString()
+    }];
+    const nuevo = DB.agregarProducto(producto);
+    DB.registrarMovimiento("entrada", nuevo.id, {
+        cantidad: nuevo.cantidad, precioUnitario: nuevo.compra,
+        proveedor: nuevo.proveedor, nota: "Entrada inicial"
+    });
+    alert("✅ Producto guardado.");
+    cerrarModalProducto();
+    actualizarInicio();
+    if (document.getElementById("pantallaInventario").classList.contains("activa")) mostrarInventario();
+}
+
+// Muestra el aviso de "este producto ya existe en otro almacén" con 3 opciones
+function mostrarAvisoDuplicado(producto, duplicados) {
+    const moneda = DB.configuracion.moneda || "CUP";
+    const overlay = document.createElement("div");
+    overlay.id = "overlayAvisoDuplicado";
+    overlay.style.cssText = "position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:99999;display:flex;align-items:flex-end;justify-content:center;";
+    overlay.innerHTML = `
+    <div style="background:var(--surface,#141a17);border-radius:20px 20px 0 0;padding:20px;width:100%;max-width:480px;box-shadow:0 -8px 30px rgba(0,0,0,0.4);">
+        <h3 style="margin:0 0 8px;font-size:16px;">⚠️ "${producto.nombre}" ya existe en otro almacén</h3>
+        <div style="max-height:180px;overflow-y:auto;margin:10px 0;display:flex;flex-direction:column;gap:6px;">
+            ${duplicados.map(d => `
+                <div style="background:var(--surface2,#1c2420);border-radius:10px;padding:8px 12px;font-size:13px;display:flex;justify-content:space-between;">
+                    <span>📍 ${d.almacen}</span>
+                    <span>${d.cantidad} ${d.unidad || ""} · ${(d.venta||0).toLocaleString("es-CU")} ${moneda}</span>
+                </div>`).join("")}
+        </div>
+        <p style="font-size:12px;color:var(--text2,#9aa);margin:0 0 14px;">Si es el mismo producto, lo mejor es transferir mercancía en vez de crear una nueva ficha, para que el stock y los costos FIFO se mantengan unificados.</p>
+        <button id="btnAvisoTransferir" style="width:100%;padding:13px;border-radius:12px;border:none;background:var(--accent,#22c55e);color:#0a0f0d;font-weight:600;font-size:14px;margin-bottom:8px;">🔄 Transferir en su lugar</button>
+        <button id="btnAvisoCrear" style="width:100%;padding:13px;border-radius:12px;border:1px solid var(--border,#2a332e);background:transparent;color:var(--text,#eee);font-size:14px;margin-bottom:8px;">➕ Crear de todas formas</button>
+        <button id="btnAvisoCancelar" style="width:100%;padding:13px;border-radius:12px;border:none;background:transparent;color:var(--text2,#9aa);font-size:14px;">✕ Cancelar</button>
+    </div>`;
+    document.body.appendChild(overlay);
+
+    document.getElementById("btnAvisoCancelar").addEventListener("click", () => overlay.remove());
+
+    document.getElementById("btnAvisoCrear").addEventListener("click", () => {
+        overlay.remove();
+        procederCrearProductoNuevo(producto);
+    });
+
+    document.getElementById("btnAvisoTransferir").addEventListener("click", () => {
+        overlay.remove();
+        // Origen: el almacén duplicado con más stock disponible
+        const origen = [...duplicados].sort((a, b) => b.cantidad - a.cantidad)[0];
+        const almacenOrigen = DB.almacenes.find(al => al.nombre === origen.almacen);
+        const almacenDestino = DB.almacenes.find(al => al.nombre === producto.almacen);
+        if (!almacenOrigen || !almacenDestino) { alert("No se pudo abrir la transferencia automáticamente. Usa el botón Transferir dentro del almacén."); return; }
+        cerrarModalProducto();
+        almacenActualId = almacenOrigen.id;
+        abrirModalTransferencia();
+        // Preseleccionar producto y almacén destino
+        seleccionarProductoTransferencia(origen.id);
+        const selectHacia = document.getElementById("transfHacia");
+        if (selectHacia) selectHacia.value = almacenDestino.id;
+    });
+}
+
+document.getElementById("guardarProducto").addEventListener("click", async () => {
     const nombre = document.getElementById("nombre").value.trim();
     const cantidad = document.getElementById("cantidad").value;
     const compra = document.getElementById("compra").value;
@@ -1240,26 +1449,39 @@ document.getElementById("guardarProducto").addEventListener("click", () => {
         codigoBarras: document.getElementById("codigoBarras").value,
         vencimiento: document.getElementById("vencimiento").value,
         observaciones: document.getElementById("observaciones").value,
-        escalas
+        escalas,
+        fotoId: fotoActualId || null
     };
 
+    // Guardar/actualizar/eliminar la foto de forma segura ANTES de tocar el producto.
+    // Si algo falla aquí, no se modifica nada y la foto anterior (si había) se conserva intacta.
+    const fotoIdPrevio = fotoActualId;
+    if (fotoEliminar) {
+        producto.fotoId = null;
+    } else if (fotoTempBlob) {
+        const nuevoFotoId = "foto_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
+        try {
+            await FotoDB.guardar(nuevoFotoId, fotoTempBlob);
+        } catch (err) {
+            alert("⚠️ No se pudo guardar la foto (puede que el almacenamiento esté lleno). El producto no se guardó; intenta de nuevo o continúa sin foto.");
+            return;
+        }
+        producto.fotoId = nuevoFotoId;
+    }
+
     if (editandoId === null) {
-        // Todo producto nuevo nace con sistema de lotes FIFO activo
-        producto.usaFifo = true;
-        producto.lotes = [{
-            id: "lote_" + Date.now(),
-            cantidad: producto.cantidad,
-            costo: producto.compra,
-            fecha: new Date().toISOString()
-        }];
-        const nuevo = DB.agregarProducto(producto);
-        DB.registrarMovimiento("entrada", nuevo.id, {
-            cantidad: nuevo.cantidad, precioUnitario: nuevo.compra,
-            proveedor: nuevo.proveedor, nota: "Entrada inicial"
-        });
-        alert("✅ Producto guardado.");
+        const duplicados = buscarDuplicadosProducto(producto.nombre, producto.almacen);
+        if (duplicados.length > 0) {
+            mostrarAvisoDuplicado(producto, duplicados);
+            return;
+        }
+        procederCrearProductoNuevo(producto);
+        if (producto.fotoId && producto.fotoId !== fotoIdPrevio && fotoIdPrevio) FotoDB.eliminar(fotoIdPrevio);
+        return;
     } else {
         DB.actualizarProducto(editandoId, producto);
+        // Solo ahora, con el producto ya actualizado con éxito, se borra la foto vieja si fue reemplazada o quitada
+        if (fotoIdPrevio && producto.fotoId !== fotoIdPrevio) FotoDB.eliminar(fotoIdPrevio);
         alert("✅ Producto actualizado.");
         editandoId = null;
     }
@@ -1281,6 +1503,11 @@ function limpiarFormulario() {
     renderEscalasProducto();
     const tpEl = document.getElementById("textoProveedorSel");
     if (tpEl) { tpEl.className = "texto-prod-placeholder"; tpEl.innerText = "Toca para seleccionar proveedor..."; }
+    fotoTempBlob = null; fotoActualId = null; fotoEliminar = false;
+    const preview = document.getElementById("fotoProductoPreview");
+    preview.src = ""; preview.classList.add("oculto");
+    document.getElementById("fotoProductoPlaceholder").classList.remove("oculto");
+    document.getElementById("fotoProductoAcciones").classList.add("oculto");
 }
 
 // ═══════════════════════════════════════════════
@@ -1304,7 +1531,12 @@ function mostrarInventario() {
         return t && u && s;
     });
 
-    filtrados.sort((a, b) => {
+    // Con "Todos" los almacenes seleccionados, Inventario agrupa por nombre de producto
+    // (visión general). Al filtrar un almacén específico, se ve el detalle plano de ese almacén.
+    const vistaAgrupada = !ubicacion;
+    let itemsRender = vistaAgrupada ? agruparProductosPorNombre(filtrados) : filtrados;
+
+    itemsRender.sort((a, b) => {
         if (orden === "nombre") return a.nombre.localeCompare(b.nombre);
         if (orden === "cantidad") return b.cantidad - a.cantidad;
         if (orden === "compra") return b.compra - a.compra;
@@ -1312,18 +1544,20 @@ function mostrarInventario() {
         return 0;
     });
 
-    document.getElementById("invSubtitulo").innerText = filtrados.length + " productos";
+    document.getElementById("invSubtitulo").innerText = itemsRender.length + " productos";
     lista.innerHTML = "";
 
-    if (filtrados.length === 0) {
+    if (itemsRender.length === 0) {
         lista.innerHTML = `<p style="text-align:center;color:var(--text2);padding:40px 0;">No se encontraron productos.</p>`;
         actualizarResumen([]);
         return;
     }
 
+    const renderItem = vistaAgrupada ? renderProductoAgrupado : renderProducto;
+
     if (agruparPorCategoria) {
         const grupos = {};
-        filtrados.forEach(p => {
+        itemsRender.forEach(p => {
             const cat = p.categoria || "Sin categoría";
             if (!grupos[cat]) grupos[cat] = [];
             grupos[cat].push(p);
@@ -1337,13 +1571,223 @@ function mostrarInventario() {
                 <span>${grupos[cat].length} productos ▾</span>
             </div>
             <div id="${grupoId}" class="grupo-contenido ${vistaActual === 'tarjeta' ? 'vista-tarjeta' : 'vista-lista'}">
-                ${grupos[cat].map(p => renderProducto(p)).join("")}
+                ${grupos[cat].map(p => renderItem(p)).join("")}
             </div>`;
         });
     } else {
-        filtrados.forEach(p => { lista.innerHTML += renderProducto(p); });
+        itemsRender.forEach(p => { lista.innerHTML += renderItem(p); });
     }
     actualizarResumen(filtrados);
+    cargarFotosVisibles(lista);
+}
+
+// Agrupa productos (una fila por producto+almacén) en un objeto por nombre,
+// sumando cantidades y guardando cada ubicación individual para el detalle.
+function agruparProductosPorNombre(productos) {
+    const grupos = {};
+    productos.forEach(p => {
+        const key = p.nombre.trim().toLowerCase();
+        if (!grupos[key]) {
+            grupos[key] = {
+                esGrupo: true,
+                key,
+                nombre: p.nombre,
+                categoria: p.categoria,
+                unidad: p.unidad,
+                venta: p.venta,
+                compra: p.compra,
+                cantidad: 0,
+                stockMinimo: 0,
+                fechaCreacion: p.fechaCreacion,
+                ubicaciones: []
+            };
+        }
+        const g = grupos[key];
+        g.cantidad += (p.cantidad || 0);
+        g.stockMinimo += (p.stockMinimo || 0);
+        g.ubicaciones.push(p);
+        if (!g.fotoId && p.fotoId) g.fotoId = p.fotoId;
+        if (p.fechaCreacion && (!g.fechaCreacion || new Date(p.fechaCreacion) > new Date(g.fechaCreacion))) g.fechaCreacion = p.fechaCreacion;
+    });
+    return Object.values(grupos);
+}
+
+// Separa los problemas de stock en dos categorías:
+// - "compras": el TOTAL del producto (sumando todas las ubicaciones) está en o bajo el mínimo → hay que comprarle al proveedor.
+// - "reposiciones": el total está bien, pero una ubicación puntual está baja y otra tiene de sobra → hay que transferir, no comprar.
+function calcularAlertasStock() {
+    const grupos = agruparProductosPorNombre(DB.productos);
+    const compras = [];
+    const reposiciones = [];
+    grupos.forEach(g => {
+        if (g.stockMinimo > 0 && g.cantidad <= g.stockMinimo) {
+            compras.push(g);
+            return;
+        }
+        g.ubicaciones.forEach(p => {
+            if (p.stockMinimo > 0 && p.cantidad <= p.stockMinimo) {
+                const origen = g.ubicaciones
+                    .filter(o => o.id !== p.id && o.cantidad > o.stockMinimo)
+                    .sort((a, b) => b.cantidad - a.cantidad)[0];
+                if (origen) reposiciones.push({ nombre: g.nombre, unidad: p.unidad, destino: p, origen });
+            }
+        });
+    });
+    return { compras, reposiciones };
+}
+
+// Hoja con la lista de "reposiciones internas" (transferir, no comprar), con acción directa por fila
+function abrirReposicionesInternas() {
+    const { reposiciones } = calcularAlertasStock();
+    const existente = document.getElementById("overlayReposiciones");
+    if (existente) existente.remove();
+    if (reposiciones.length === 0) { abrirInventario(); return; }
+
+    const overlay = document.createElement("div");
+    overlay.id = "overlayReposiciones";
+    overlay.style.cssText = "position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:9998;display:flex;align-items:flex-end;justify-content:center;";
+    overlay.innerHTML = `
+    <div style="background:var(--surface,#141a17);border-radius:20px 20px 0 0;padding:20px;width:100%;max-width:480px;max-height:80vh;overflow-y:auto;box-shadow:0 -8px 30px rgba(0,0,0,0.4);">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+            <h3 style="margin:0;font-size:17px;">🔄 Reposición interna</h3>
+            <span id="btnCerrarReposiciones" style="cursor:pointer;font-size:20px;color:var(--text2,#9aa);padding:4px 8px;">✕</span>
+        </div>
+        <p style="margin:0 0 14px;font-size:13px;color:var(--text2,#9aa);">Están bajos en una ubicación, pero hay mercancía de sobra en otro almacén. No hace falta comprar, solo mover.</p>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+            ${reposiciones.map((r, i) => `
+                <div style="background:var(--surface2,#1c2420);border-radius:12px;padding:12px 14px;">
+                    <div style="font-weight:600;margin-bottom:4px;">${r.nombre}</div>
+                    <div style="font-size:13px;color:var(--text2,#9aa);">📍 ${r.destino.almacen} (${r.destino.cantidad} ${r.unidad||""}) ← ${r.origen.almacen} (${r.origen.cantidad} ${r.unidad||""})</div>
+                    <button data-idx="${i}" class="btnRepTransferir" style="margin-top:8px;width:100%;padding:9px;border-radius:9px;border:none;background:var(--accent,#22c55e);color:#0a0f0d;font-weight:600;font-size:13px;">Transferir</button>
+                </div>`).join("")}
+        </div>
+    </div>`;
+    document.body.appendChild(overlay);
+
+    document.getElementById("btnCerrarReposiciones").addEventListener("click", () => overlay.remove());
+    overlay.querySelectorAll(".btnRepTransferir").forEach(btn => {
+        btn.addEventListener("click", () => {
+            const r = reposiciones[Number(btn.getAttribute("data-idx"))];
+            const almacenOrigen = DB.almacenes.find(al => al.nombre === r.origen.almacen);
+            const almacenDestino = DB.almacenes.find(al => al.nombre === r.destino.almacen);
+            if (!almacenOrigen) { alert("No se pudo abrir la transferencia. Usa el botón Transferir dentro del almacén."); return; }
+            overlay.remove();
+            almacenActualId = almacenOrigen.id;
+            abrirModalTransferencia();
+            seleccionarProductoTransferencia(r.origen.id);
+            const selectHacia = document.getElementById("transfHacia");
+            if (selectHacia && almacenDestino) selectHacia.value = almacenDestino.id;
+        });
+    });
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
+}
+
+function renderProductoAgrupado(g) {
+    const bajo = g.cantidad <= g.stockMinimo;
+    const badge = bajo ? `<span class="badge-stock">⚠️</span>` : "";
+    const icono = ICONOS[g.categoria] || "📦";
+    const moneda = DB.configuracion.moneda || "CUP";
+    const ocultarCompra = DB.configuracion.ocultarCompra;
+    const nUbic = g.ubicaciones.length;
+    const ubicTexto = nUbic === 1 ? "1 ubicación" : `${nUbic} ubicaciones`;
+    const keyEnc = encodeURIComponent(g.key);
+    const fotoTag = g.fotoId
+        ? `<div class="prod-thumb"><img data-foto-id="${g.fotoId}" alt=""></div>`
+        : `<div class="prod-thumb prod-thumb-vacio">${icono}</div>`;
+
+    if (vistaActual === "tarjeta") {
+        return `
+        <div class="producto-card-grid ${bajo ? 'stock-bajo' : ''}" onclick="abrirDetalleAgrupado('${keyEnc}')">
+            <div class="card-tap-hint">Toca para ver ubicaciones</div>
+            ${fotoTag}
+            <h3>${icono} ${g.nombre}${badge}</h3>
+            <div class="precio">${(g.venta||0).toLocaleString("es-CU")} ${moneda}</div>
+            ${!ocultarCompra ? `<div class="precio-compra">Compra: ${(g.compra||0).toLocaleString("es-CU")} ${moneda}</div>` : ''}
+            <div class="cantidad">${g.cantidad} ${g.unidad || ""}</div>
+            <div class="ubicacion">📍 ${ubicTexto}</div>
+        </div>`;
+    } else {
+        return `
+        <div class="producto-fila ${bajo ? 'stock-bajo' : ''}" onclick="abrirDetalleAgrupado('${keyEnc}')" style="display:flex;align-items:center;gap:10px;">
+            <div class="prod-thumb prod-thumb-mini">${g.fotoId ? `<img data-foto-id="${g.fotoId}" alt="">` : icono}</div>
+            <div class="info-fila" style="flex:1;">
+                <h3>${g.nombre}${badge}</h3>
+                <span>${g.cantidad} ${g.unidad||""} · ${ubicTexto}</span>
+            </div>
+            <div class="precios-fila">
+                <div class="pv">${(g.venta||0).toLocaleString("es-CU")} ${moneda}</div>
+                ${!ocultarCompra ? `<div class="pc">${(g.compra||0).toLocaleString("es-CU")} ${moneda}</div>` : ''}
+            </div>
+            <div class="fila-accion-hint">›</div>
+        </div>`;
+    }
+}
+
+// Hoja de detalle: desglose del producto por almacén, con acceso a lotes FIFO y transferencia
+function abrirDetalleAgrupado(keyEnc) {
+    const key = decodeURIComponent(keyEnc);
+    const items = DB.productos.filter(p => p.nombre.trim().toLowerCase() === key);
+    if (items.length === 0) return;
+    const total = items.reduce((s, p) => s + (p.cantidad || 0), 0);
+    const moneda = DB.configuracion.moneda || "CUP";
+    const icono = ICONOS[items[0].categoria] || "📦";
+    const ocultarCompra = DB.configuracion.ocultarCompra;
+
+    const existente = document.getElementById("overlayDetalleAgrupado");
+    if (existente) existente.remove();
+    const overlay = document.createElement("div");
+    overlay.id = "overlayDetalleAgrupado";
+    overlay.style.cssText = "position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:9998;display:flex;align-items:flex-end;justify-content:center;";
+    overlay.innerHTML = `
+    <div style="background:var(--surface,#141a17);border-radius:20px 20px 0 0;padding:20px;width:100%;max-width:480px;max-height:80vh;overflow-y:auto;box-shadow:0 -8px 30px rgba(0,0,0,0.4);">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">
+            <h3 style="margin:0;font-size:17px;">${icono} ${items[0].nombre}</h3>
+            <span id="btnCerrarDetalleAgrupado" style="cursor:pointer;font-size:20px;color:var(--text2,#9aa);padding:4px 8px;">✕</span>
+        </div>
+        <p style="margin:0 0 14px;font-size:14px;color:var(--text2,#9aa);">Total: <strong style="color:var(--text,#eee);">${total} ${items[0].unidad||""}</strong> en ${items.length} ${items.length === 1 ? "ubicación" : "ubicaciones"}</p>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+            ${items.map(p => `
+                <div style="background:var(--surface2,#1c2420);border-radius:12px;padding:12px 14px;display:flex;align-items:center;gap:10px;">
+                    <div class="det-agr-item" data-id="${p.id}" style="flex:1;cursor:pointer;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;">
+                            <span style="font-weight:600;">📍 ${p.almacen || "—"}</span>
+                            <span>${p.cantidad} ${p.unidad||""}</span>
+                        </div>
+                        <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text2,#9aa);margin-top:4px;">
+                            <span>Venta: ${(p.venta||0).toLocaleString("es-CU")} ${moneda}${ocultarCompra ? "" : " · Compra: " + (p.compra||0).toLocaleString("es-CU") + " " + moneda}</span>
+                            <span>${(p.usaFifo && p.lotes && p.lotes.length > 1) ? p.lotes.length + " lotes" : ""}</span>
+                        </div>
+                    </div>
+                    <button class="btn-transf-ubicacion" data-id="${p.id}" title="Transferir desde ${p.almacen}" style="flex-shrink:0;width:38px;height:38px;border-radius:10px;border:1px solid var(--border,#2a332e);background:transparent;font-size:16px;">🔄</button>
+                </div>`).join("")}
+        </div>
+        <p style="font-size:11px;color:var(--text3,#778);text-align:center;margin:14px 0 0;">Toca una ubicación para ver lotes y acciones. Toca 🔄 para transferir desde ahí.</p>
+    </div>`;
+    document.body.appendChild(overlay);
+
+    overlay.querySelectorAll(".det-agr-item").forEach(el => {
+        el.addEventListener("click", () => {
+            const id = el.getAttribute("data-id");
+            overlay.remove();
+            abrirSheetAcciones(id);
+        });
+    });
+    document.getElementById("btnCerrarDetalleAgrupado").addEventListener("click", () => overlay.remove());
+    overlay.querySelectorAll(".btn-transf-ubicacion").forEach(btn => {
+        btn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const id = btn.getAttribute("data-id");
+            const origen = items.find(p => p.id === id);
+            if (!origen) return;
+            const almacenOrigen = DB.almacenes.find(al => al.nombre === origen.almacen);
+            if (!almacenOrigen) { alert("No se pudo abrir la transferencia. Usa el botón Transferir dentro del almacén."); return; }
+            overlay.remove();
+            almacenActualId = almacenOrigen.id;
+            abrirModalTransferencia();
+            seleccionarProductoTransferencia(origen.id);
+        });
+    });
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
 }
 
 function renderProducto(p) {
@@ -1355,11 +1799,16 @@ function renderProducto(p) {
     const costosDistintos = p.usaFifo && p.lotes && new Set(p.lotes.map(l => l.costo)).size > 1;
     const badgeFifo = costosDistintos ? `<span class="badge-fifo">📦 ${p.lotes.length} lotes</span>` : "";
     const badgeEscalas = (p.escalas && p.escalas.length > 0) ? `<span class="badge-escalas">🏷️ Mayorista</span>` : "";
+    // Miniatura: si el producto tiene fotoId, se pinta un <img> vacío con data-foto-id que cargarFotosVisibles() rellena de forma perezosa
+    const fotoTag = p.fotoId
+        ? `<div class="prod-thumb"><img data-foto-id="${p.fotoId}" alt=""></div>`
+        : `<div class="prod-thumb prod-thumb-vacio">${icono}</div>`;
 
     if (vistaActual === "tarjeta") {
         return `
         <div class="producto-card-grid ${bajo ? 'stock-bajo' : ''}" onclick="abrirSheetAcciones('${p.id}')">
             <div class="card-tap-hint">Toca para acciones</div>
+            ${fotoTag}
             <h3>${icono} ${p.nombre}${badge}</h3>
             <div class="precio">${(p.venta||0).toLocaleString("es-CU")} ${moneda}${badgeEscalas}</div>
             ${!ocultarCompra ? `<div class="precio-compra">Compra: ${(p.compra||0).toLocaleString("es-CU")} ${moneda}${badgeFifo}</div>` : ''}
@@ -1368,8 +1817,9 @@ function renderProducto(p) {
         </div>`;
     } else {
         return `
-        <div class="producto-fila ${bajo ? 'stock-bajo' : ''}" onclick="abrirSheetAcciones('${p.id}')">
-            <div class="info-fila">
+        <div class="producto-fila ${bajo ? 'stock-bajo' : ''}" onclick="abrirSheetAcciones('${p.id}')" style="display:flex;align-items:center;gap:10px;">
+            <div class="prod-thumb prod-thumb-mini">${p.fotoId ? `<img data-foto-id="${p.fotoId}" alt="">` : icono}</div>
+            <div class="info-fila" style="flex:1;">
                 <h3>${p.nombre}${badge}${badgeEscalas}</h3>
                 <span>${p.cantidad} ${p.unidad||""} · ${p.almacen||"—"}${badgeFifo}</span>
             </div>
@@ -1446,6 +1896,33 @@ function editarProducto(id) {
     document.getElementById("guardarProducto").innerText = "💾 Actualizar Producto";
     document.getElementById("modalProducto").classList.remove("oculto");
     document.getElementById("btnFlotante").classList.add("ocultar-boton");
+    cargarFotoEnFormulario(p.fotoId);
+}
+
+// Muestra en el picker del modal la foto ya guardada de un producto (si tiene)
+async function cargarFotoEnFormulario(fotoId) {
+    fotoActualId = fotoId || null;
+    fotoTempBlob = null;
+    fotoEliminar = false;
+    const preview = document.getElementById("fotoProductoPreview");
+    const placeholder = document.getElementById("fotoProductoPlaceholder");
+    const acciones = document.getElementById("fotoProductoAcciones");
+    if (!fotoId) {
+        preview.src = ""; preview.classList.add("oculto");
+        placeholder.classList.remove("oculto");
+        acciones.classList.add("oculto");
+        return;
+    }
+    const url = await urlFoto(fotoId);
+    if (url) {
+        preview.src = url; preview.classList.remove("oculto");
+        placeholder.classList.add("oculto");
+        acciones.classList.remove("oculto");
+    } else {
+        preview.src = ""; preview.classList.add("oculto");
+        placeholder.classList.remove("oculto");
+        acciones.classList.add("oculto");
+    }
 }
 
 function duplicarProducto(id) {
@@ -1472,10 +1949,16 @@ function duplicarProducto(id) {
     document.getElementById("guardarProducto").innerText = "💾 Guardar Copia";
     document.getElementById("modalProducto").classList.remove("oculto");
     document.getElementById("btnFlotante").classList.add("ocultar-boton");
+    // La copia no arrastra automáticamente la foto (evita que dos productos compartan la misma imagen en IndexedDB); se puede añadir una nueva si se desea.
+    cargarFotoEnFormulario(null);
 }
 
 function eliminarProducto(id) {
-    if (confirm("¿Eliminar este producto?")) { DB.eliminarProducto(id); mostrarInventario(); actualizarInicio(); }
+    if (confirm("¿Eliminar este producto?")) {
+        const p = DB.buscarProducto(id);
+        if (p && p.fotoId) FotoDB.eliminar(p.fotoId);
+        DB.eliminarProducto(id); mostrarInventario(); actualizarInicio();
+    }
 }
 
 // ═══════════════════════════════════════════════
@@ -1608,7 +2091,15 @@ document.getElementById("buscar").addEventListener("input", mostrarInventario);
 function abrirSheetAcciones(id) {
     const p = DB.buscarProducto(id); if (!p) return;
     productoAccionId = id;
-    document.getElementById("saIcono").innerText = ICONOS[p.categoria] || "📦";
+    document.getElementById("saIconoEmoji").innerText = ICONOS[p.categoria] || "📦";
+    const saFoto = document.getElementById("saFoto");
+    if (p.fotoId) {
+        urlFoto(p.fotoId).then(url => {
+            if (url && productoAccionId === id) { saFoto.src = url; saFoto.classList.remove("oculto"); }
+        });
+    } else {
+        saFoto.src = ""; saFoto.classList.add("oculto");
+    }
     document.getElementById("saNombre").innerText = p.nombre;
     const stockTexto = `${p.cantidad} ${p.unidad || ""}`;
     const stockEl = document.getElementById("saStock");
@@ -2311,10 +2802,10 @@ function probarNotificacion() {
 function verificarStockAlIniciar() {
     if (!DB.configuracion.notifStockBajo) return;
     if (!("Notification" in window) || Notification.permission !== "granted") return;
-    const bajos = DB.productos.filter(p => p.cantidad <= p.stockMinimo && p.stockMinimo > 0);
-    if (bajos.length > 0) {
-        const nombres = bajos.slice(0, 3).map(p => p.nombre).join(", ");
-        enviarNotificacion(`⚠️ ${bajos.length} producto(s) con stock bajo`, nombres);
+    const { compras } = calcularAlertasStock();
+    if (compras.length > 0) {
+        const nombres = compras.slice(0, 3).map(g => g.nombre).join(", ");
+        enviarNotificacion(`⚠️ ${compras.length} producto(s) con stock bajo`, nombres);
     }
     // Verificar vencimientos
     if (DB.configuracion.notifVencimiento) {
