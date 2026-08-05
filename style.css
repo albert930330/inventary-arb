@@ -171,8 +171,8 @@ body {
 .fila-doble { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .btn-detalles { width: 100%; padding: 12px; background: transparent; color: var(--accent); border: 1px dashed rgba(0,232,150,0.3); border-radius: 12px; font-size: 14px; font-weight: 600; margin-top: 14px; margin-bottom: 4px; cursor: pointer; }
 textarea { height: 80px; resize: none; }
-#guardarProducto, #btnRegistrarMov, #btnConfirmarAjuste, #btnConfirmarEditMov, #btnGuardarGasto, #btnConfirmarTransferencia { width: 100%; padding: 15px; background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #0a0f0d; border: none; border-radius: 14px; font-size: 16px; font-weight: 700; margin-top: 18px; cursor: pointer; transition: 0.2s; font-family: 'Syne', Arial, sans-serif; }
-#guardarProducto:active, #btnRegistrarMov:active, #btnConfirmarAjuste:active, #btnConfirmarEditMov:active, #btnGuardarGasto:active, #btnConfirmarTransferencia:active { transform: scale(0.98); }
+#guardarProducto, #btnRegistrarMov, #btnConfirmarAjuste, #btnConfirmarEditMov, #btnGuardarGasto, #btnConfirmarTransferencia, #btnConfirmarApertura, #btnConfirmarMovCaja, #btnConfirmarCierreSesion, #btnAceptarCierreSesion { width: 100%; padding: 15px; background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #0a0f0d; border: none; border-radius: 14px; font-size: 16px; font-weight: 700; margin-top: 18px; cursor: pointer; transition: 0.2s; font-family: 'Syne', Arial, sans-serif; }
+#guardarProducto:active, #btnRegistrarMov:active, #btnConfirmarAjuste:active, #btnConfirmarEditMov:active, #btnGuardarGasto:active, #btnConfirmarTransferencia:active, #btnConfirmarApertura:active, #btnConfirmarMovCaja:active, #btnConfirmarCierreSesion:active, #btnAceptarCierreSesion:active { transform: scale(0.98); }
 .tabs { display: flex; gap: 8px; padding: 12px 20px; position: sticky; top: 61px; background: var(--bg); z-index: 10; border-bottom: 1px solid var(--border); }
 .tab { flex: 1; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text2); font-size: 15px; font-weight: 600; cursor: pointer; transition: 0.2s; }
 .tab.activo { background: var(--accent); color: #0a0f0d; border-color: var(--accent); }
@@ -297,6 +297,20 @@ textarea { height: 80px; resize: none; }
 .sa-precio-item strong { font-family: 'Syne', Arial, sans-serif; font-size: 13px; font-weight: 700; color: var(--text); }
 .sa-precio-item strong.accent { color: var(--accent); }
 .sa-precio-sep { width: 1px; height: 30px; background: var(--border); flex-shrink: 0; }
+
+/* Resumen en vivo de la sesión de caja */
+.sc-stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 16px 20px 0; }
+.sc-stat-item { background: var(--surface2); border: 1px solid var(--border); border-radius: 14px; padding: 12px 14px; }
+.sc-stat-item span { display: block; font-size: 11px; color: var(--text2); margin-bottom: 4px; }
+.sc-stat-item strong { font-family: 'Syne', Arial, sans-serif; font-size: 15px; font-weight: 700; color: var(--text); }
+.sc-stat-warn strong { color: var(--warn); }
+.sc-stat-full { grid-column: 1 / -1; margin: 0 20px 0; }
+
+/* Resultado del cierre de caja */
+.cs-resultado { text-align: center; padding: 14px; border-radius: 14px; font-family: 'Syne', Arial, sans-serif; font-weight: 700; font-size: 15px; margin-top: 14px; }
+.cs-resultado-ok { background: rgba(0,232,150,0.1); border: 1px solid rgba(0,232,150,0.25); color: var(--accent); }
+.cs-resultado-warn { background: rgba(255,107,74,0.1); border: 1px solid rgba(255,107,74,0.25); color: var(--warn); }
+
 .sa-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; padding: 16px 20px 0; flex-shrink: 0; }
 .sa-btn { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; padding: 16px 8px; border-radius: 16px; border: 1px solid var(--border); background: var(--surface2); font-size: 12px; font-weight: 600; color: var(--text); cursor: pointer; transition: 0.15s; user-select: none; }
 .sa-btn:active { transform: scale(0.94); }
@@ -1553,6 +1567,26 @@ textarea { height: 80px; resize: none; }
 /* ══════════════════════════════════════════════════
    MÓDULO CAJA POS
    ══════════════════════════════════════════════════ */
+
+/* Barra de estado de la sesión de caja */
+.caja-estado-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  cursor: pointer;
+  font-size: 20px;
+}
+.caja-estado-texto { display: flex; flex-direction: column; flex: 1; }
+.caja-estado-texto span:first-child { font-size: 13px; font-weight: 700; color: var(--text); }
+.caja-estado-texto span:last-child { font-size: 11px; color: var(--text2); }
+.caja-estado-accion { flex-shrink: 0; font-size: 12px; font-weight: 700; font-family: 'Syne', Arial, sans-serif; padding: 8px 14px; border-radius: 20px; white-space: nowrap; }
+.caja-estado-abierta { background: rgba(0,232,150,0.08); border-bottom: 1px solid rgba(0,232,150,0.18); }
+.caja-estado-cerrada { background: rgba(255,107,74,0.08); border-bottom: 1px solid rgba(255,107,74,0.18); animation: cajaCerradaPulso 2.2s ease-in-out infinite; }
+.caja-estado-cerrada .caja-estado-texto span:first-child { color: var(--warn); }
+.caja-estado-abierta .caja-estado-accion { background: rgba(0,232,150,0.15); border: 1px solid rgba(0,232,150,0.35); color: var(--accent); }
+.caja-estado-cerrada .caja-estado-accion { background: var(--warn); border: 1px solid var(--warn); color: #1a0e08; }
+@keyframes cajaCerradaPulso { 0%, 100% { background: rgba(255,107,74,0.08); } 50% { background: rgba(255,107,74,0.16); } }
 
 /* Barra de total siempre visible */
 .pos-total-bar {

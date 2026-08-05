@@ -6,6 +6,8 @@ const DB = {
         this.productos = JSON.parse(localStorage.getItem("productos")) || [];
         this.movimientos = JSON.parse(localStorage.getItem("movimientos")) || [];
         this.gastos = JSON.parse(localStorage.getItem("gastos")) || [];
+        this.caja = JSON.parse(localStorage.getItem("caja")) || { sesionActiva: null };
+        this.sesionesCaja = JSON.parse(localStorage.getItem("sesionesCaja")) || [];
         this.clientes = JSON.parse(localStorage.getItem("clientes")) || [];
         this.proveedores = JSON.parse(localStorage.getItem("proveedores")) || [];
         this.almacenes = JSON.parse(localStorage.getItem("almacenes")) || [
@@ -18,7 +20,7 @@ const DB = {
             regimenFiscal: "TCP", numONAT: "", actividad: "", piePagina: "",
             moneda: "CUP", stockMinimo: 5, alertasStock: true, vistaLista: true,
             mostrarAgotados: true, alertaVencimiento: true, agruparCategoria: false,
-            metodoPagoDefault: "efectivo", ventasSinStock: false, solicitarCliente: false,
+            metodoPagoDefault: "efectivo", ventasSinStock: false, solicitarCliente: false, cajaObligatoria: false,
             numAuto: true, proxFactura: 1,
             impuestoAuto: false, porcentajeImpuesto: 10,
             notifStockBajo: true, notifAlSalida: true, notifVencimiento: true, diasVencimiento: 7,
@@ -47,6 +49,8 @@ const DB = {
         localStorage.setItem("productos", JSON.stringify(this.productos));
         localStorage.setItem("movimientos", JSON.stringify(this.movimientos));
         localStorage.setItem("gastos", JSON.stringify(this.gastos));
+        localStorage.setItem("caja", JSON.stringify(this.caja));
+        localStorage.setItem("sesionesCaja", JSON.stringify(this.sesionesCaja));
         localStorage.setItem("clientes", JSON.stringify(this.clientes));
         localStorage.setItem("proveedores", JSON.stringify(this.proveedores));
         localStorage.setItem("almacenes", JSON.stringify(this.almacenes));
@@ -150,6 +154,85 @@ const DB = {
         p.lotes.unshift({ id: "lote_" + Date.now(), cantidad, costo, fecha: new Date().toISOString() });
         this.sincronizarLotes(p);
         this.guardar();
+    },
+
+    // ── CAJA (sesiones) ──
+    abrirCaja(fondoInicial, responsable) {
+        const sesion = {
+            id: "caja_" + Date.now(),
+            fechaApertura: new Date().toISOString(),
+            fechaCierre: null,
+            responsable: responsable || "",
+            fondoInicial: Number(fondoInicial) || 0,
+            estado: "abierta",
+            movimientosCaja: [], // gastos y retiros de la sesión (Fase 2)
+            cierre: null         // fotografía congelada al cerrar (Fase 3)
+        };
+        this.sesionesCaja.push(sesion);
+        this.caja.sesionActiva = sesion.id;
+        this.guardar();
+        return sesion;
+    },
+
+    sesionCajaActiva() {
+        if (!this.caja.sesionActiva) return null;
+        return this.sesionesCaja.find(s => s.id === this.caja.sesionActiva) || null;
+    },
+
+    agregarMovimientoCaja(tipo, monto, concepto) {
+        const sesion = this.sesionCajaActiva();
+        if (!sesion) return null;
+        const mov = { id: "movcaja_" + Date.now(), tipo, monto: Number(monto) || 0, concepto, fecha: new Date().toISOString() };
+        sesion.movimientosCaja.push(mov);
+        this.guardar();
+        return mov;
+    },
+
+    // Calcula el resumen en vivo de una sesión (ventas por método, gastos, retiros, esperado en caja)
+    resumenSesion(sesion) {
+        const ventasSesion = this.movimientos.filter(m => m.tipo === "salida" && m.sesionCajaId === sesion.id);
+        let efectivo = 0, transferencia = 0, fiado = 0, articulos = 0, ventasTotal = 0, costoTotal = 0;
+        const facturas = new Set();
+        ventasSesion.forEach(m => {
+            const monto = (m.precioUnitario || 0) * (m.cantidad || 0);
+            ventasTotal += monto;
+            if (typeof m.costoReal === "number") costoTotal += m.costoReal * (m.cantidad || 0);
+            if (m.metodoPago === "efectivo") efectivo += monto;
+            else if (m.metodoPago === "transfermovil" || m.metodoPago === "enzona") transferencia += monto;
+            else if (m.metodoPago === "fiado") fiado += monto;
+            else if (m.metodoPago === "mixto") { efectivo += m.montoEfectivo || 0; transferencia += m.montoTransferencia || 0; }
+            articulos += m.cantidad || 0;
+            if (m.factura) facturas.add(m.factura);
+        });
+        const gastos = sesion.movimientosCaja.filter(mc => mc.tipo === "gasto").reduce((s, mc) => s + mc.monto, 0);
+        const retiros = sesion.movimientosCaja.filter(mc => mc.tipo === "retiro").reduce((s, mc) => s + mc.monto, 0);
+        const ganancia = ventasTotal - costoTotal;
+        const numVentas = facturas.size || ventasSesion.length;
+        const esperado = sesion.fondoInicial + efectivo - gastos - retiros;
+        return { efectivo, transferencia, fiado, articulos, numVentas, gastos, retiros, ventasTotal, costoTotal, ganancia, esperado };
+    },
+
+    // Cierra la sesión activa: calcula todo una última vez y lo congela en sesion.cierre ("fotografía" del día)
+    cerrarCaja(efectivoContado) {
+        const sesion = this.sesionCajaActiva();
+        if (!sesion) return null;
+        const r = this.resumenSesion(sesion);
+        const contado = Number(efectivoContado) || 0;
+        const diferencia = contado - r.esperado;
+        sesion.cierre = {
+            fechaCierre: new Date().toISOString(),
+            fondoInicial: sesion.fondoInicial,
+            ventasEfectivo: r.efectivo, ventasTransferencia: r.transferencia, ventasFiado: r.fiado,
+            ventasTotal: r.ventasTotal, costoTotal: r.costoTotal, ganancia: r.ganancia,
+            gastos: r.gastos, retiros: r.retiros,
+            esperado: r.esperado, contado, diferencia,
+            numVentas: r.numVentas, articulos: r.articulos
+        };
+        sesion.estado = "cerrada";
+        sesion.fechaCierre = sesion.cierre.fechaCierre;
+        this.caja.sesionActiva = null;
+        this.guardar();
+        return sesion;
     },
 
     // ── GASTOS ──
@@ -625,6 +708,270 @@ function abrirCajaPOS() {
     if (btnMetodo) seleccionarMetodoPOS(btnMetodo);
     else seleccionarMetodoPOS(document.querySelector('.pos-metodo[data-metodo="efectivo"]'));
     renderCarrito(); // Inicializa estado vacío correctamente
+    renderEstadoCaja();
+}
+
+// ── Sesión de caja (Fase 1: apertura + estado) ──
+function renderEstadoCaja() {
+    const bar = document.getElementById("cajaEstadoBar");
+    const sesion = DB.sesionCajaActiva();
+    const moneda = DB.configuracion.moneda || "CUP";
+    if (sesion) {
+        bar.classList.remove("caja-estado-cerrada");
+        bar.classList.add("caja-estado-abierta");
+        document.getElementById("cajaEstadoIcono").innerText = "🟢";
+        document.getElementById("cajaEstadoTitulo").innerText = "Caja abierta";
+        const hora = new Date(sesion.fechaApertura).toLocaleTimeString("es-CU", { hour: "2-digit", minute: "2-digit" });
+        document.getElementById("cajaEstadoSub").innerText = `Desde ${hora} · Fondo: ${sesion.fondoInicial.toLocaleString("es-CU")} ${moneda}`;
+        document.getElementById("cajaEstadoAccion").innerText = "Ver resumen ›";
+    } else {
+        bar.classList.remove("caja-estado-abierta");
+        bar.classList.add("caja-estado-cerrada");
+        document.getElementById("cajaEstadoIcono").innerText = "🔴";
+        document.getElementById("cajaEstadoTitulo").innerText = "Caja cerrada";
+        document.getElementById("cajaEstadoSub").innerText = DB.configuracion.cajaObligatoria ? "Debes abrir caja para vender" : "Toca el botón para empezar";
+        document.getElementById("cajaEstadoAccion").innerText = "Abrir caja ›";
+    }
+}
+
+function onTapEstadoCaja() {
+    if (DB.sesionCajaActiva()) { abrirSheetSesionCaja(); return; }
+    abrirModalAperturaCaja();
+}
+
+function abrirModalAperturaCaja() {
+    document.getElementById("aperturaFechaHora").innerText = new Date().toLocaleString("es-CU", { dateStyle: "long", timeStyle: "short" });
+    document.getElementById("aperturaResponsable").value = DB.configuracion.propietario || "";
+    document.getElementById("aperturaFondoInicial").value = "";
+    document.getElementById("modalAperturaCaja").classList.remove("oculto");
+}
+
+function cerrarModalAperturaCaja() {
+    document.getElementById("modalAperturaCaja").classList.add("oculto");
+}
+
+function confirmarAperturaCaja() {
+    const fondoInicial = document.getElementById("aperturaFondoInicial").value;
+    if (fondoInicial === "" || Number(fondoInicial) < 0) { alert("⚠️ Ingresa el fondo inicial (puede ser 0)."); return; }
+    const responsable = document.getElementById("aperturaResponsable").value.trim();
+    DB.abrirCaja(fondoInicial, responsable);
+    cerrarModalAperturaCaja();
+    renderEstadoCaja();
+    mostrarToastPOS({ texto: "🟢 Caja abierta" });
+}
+
+// ── Resumen en vivo de la sesión de caja (Fase 2) ──
+function abrirSheetSesionCaja() {
+    const sesion = DB.sesionCajaActiva();
+    if (!sesion) { abrirModalAperturaCaja(); return; }
+    renderSheetSesionCaja();
+    document.getElementById("sheetSesionCaja").classList.remove("oculto");
+}
+
+function cerrarSheetSesionCaja() {
+    document.getElementById("sheetSesionCaja").classList.add("oculto");
+}
+
+function cerrarSheetSesionCajaSiOverlay(e) {
+    if (e.target === document.getElementById("sheetSesionCaja")) cerrarSheetSesionCaja();
+}
+
+function renderSheetSesionCaja() {
+    const sesion = DB.sesionCajaActiva();
+    if (!sesion) return;
+    const moneda = DB.configuracion.moneda || "CUP";
+    const r = DB.resumenSesion(sesion);
+
+    document.getElementById("scEfectivo").innerText = r.efectivo.toLocaleString("es-CU") + " " + moneda;
+    document.getElementById("scTransferencia").innerText = r.transferencia.toLocaleString("es-CU") + " " + moneda;
+    document.getElementById("scFiado").innerText = r.fiado.toLocaleString("es-CU") + " " + moneda;
+    document.getElementById("scVentas").innerText = r.numVentas;
+    document.getElementById("scArticulos").innerText = r.articulos;
+    document.getElementById("scGastos").innerText = r.gastos.toLocaleString("es-CU") + " " + moneda;
+    document.getElementById("scRetiros").innerText = r.retiros.toLocaleString("es-CU") + " " + moneda;
+    document.getElementById("scHoraApertura").innerText = new Date(sesion.fechaApertura).toLocaleTimeString("es-CU", { hour: "2-digit", minute: "2-digit" });
+    document.getElementById("scFondoInicial").innerText = sesion.fondoInicial.toLocaleString("es-CU") + " " + moneda;
+
+    const listaEl = document.getElementById("scMovimientosLista");
+    if (sesion.movimientosCaja.length === 0) {
+        listaEl.innerHTML = `<div class="cfg-row" style="cursor:default;"><div class="cfg-row-body"><span class="cfg-row-sub">Sin gastos ni retiros registrados</span></div></div>`;
+    } else {
+        listaEl.innerHTML = [...sesion.movimientosCaja].reverse().map((mc, i, arr) => `
+            <div class="cfg-row" style="cursor:default;">
+                <div class="cfg-row-body">
+                    <span class="cfg-row-titulo">${mc.tipo === "gasto" ? "💸" : "🏦"} ${mc.concepto}</span>
+                    <span class="cfg-row-sub">${new Date(mc.fecha).toLocaleTimeString("es-CU", { hour: "2-digit", minute: "2-digit" })}</span>
+                </div>
+                <strong style="color:var(--warn);">-${mc.monto.toLocaleString("es-CU")} ${moneda}</strong>
+            </div>${i < arr.length - 1 ? '<div class="cfg-row-sep"></div>' : ''}`).join("");
+    }
+}
+
+// ── Gasto / retiro de caja (Fase 2) ──
+let movCajaTipoActual = "gasto";
+
+function abrirModalMovimientoCaja(tipo) {
+    if (!DB.sesionCajaActiva()) { alert("⚠️ No hay una caja abierta."); return; }
+    cerrarSheetSesionCaja(); // el sheet tiene z-index mayor que el modal; hay que ocultarlo para que el modal quede al frente
+    movCajaTipoActual = tipo;
+    const esGasto = tipo === "gasto";
+    document.getElementById("movCajaTitulo").innerText = esGasto ? "💸 Salida de Efectivo" : "🏦 Retiro de Caja";
+    document.getElementById("movCajaConceptoLabel").innerText = esGasto ? "Concepto *" : "Motivo *";
+    document.getElementById("movCajaConcepto").value = "";
+    document.getElementById("movCajaConcepto").placeholder = esGasto ? "Ej: Transporte, hielo, cambio..." : "Ej: Depósito bancario";
+    document.getElementById("movCajaMonto").value = "";
+    document.getElementById("modalMovimientoCaja").classList.remove("oculto");
+}
+
+function cerrarModalMovimientoCaja() {
+    document.getElementById("modalMovimientoCaja").classList.add("oculto");
+    abrirSheetSesionCaja(); // volver a mostrar el resumen de caja, ya actualizado
+}
+
+function confirmarMovimientoCaja() {
+    if (!DB.sesionCajaActiva()) { alert("⚠️ No hay una caja abierta."); cerrarModalMovimientoCaja(); return; }
+    const concepto = document.getElementById("movCajaConcepto").value.trim();
+    const monto = Number(document.getElementById("movCajaMonto").value);
+    if (!concepto) { alert("⚠️ Escribe un " + (movCajaTipoActual === "gasto" ? "concepto." : "motivo.")); return; }
+    if (!monto || monto <= 0) { alert("⚠️ Ingresa un monto válido."); return; }
+    DB.agregarMovimientoCaja(movCajaTipoActual, monto, concepto);
+    cerrarModalMovimientoCaja();
+    renderEstadoCaja();
+    mostrarToastPOS({ texto: movCajaTipoActual === "gasto" ? "💸 Salida registrada" : "🏦 Retiro registrado" });
+}
+
+// ── Cierre de sesión de caja (Fase 3) ──
+function abrirModalCierreSesionCaja() {
+    const sesion = DB.sesionCajaActiva();
+    if (!sesion) return;
+    cerrarSheetSesionCaja();
+    const r = DB.resumenSesion(sesion);
+    const moneda = DB.configuracion.moneda || "CUP";
+    document.getElementById("csDesglose").innerHTML = `
+        <div class="dashfin-row"><span>Fondo inicial</span><strong>${sesion.fondoInicial.toLocaleString("es-CU")} ${moneda}</strong></div>
+        <div class="dashfin-row"><span>+ Ventas efectivo</span><strong>${r.efectivo.toLocaleString("es-CU")} ${moneda}</strong></div>
+        <div class="dashfin-row dashfin-resta"><span>− Gastos</span><strong>${r.gastos.toLocaleString("es-CU")} ${moneda}</strong></div>
+        <div class="dashfin-row dashfin-resta"><span>− Retiros</span><strong>${r.retiros.toLocaleString("es-CU")} ${moneda}</strong></div>
+        <div class="dashfin-sep"></div>
+        <div class="dashfin-row dashfin-total"><span>Debe haber</span><strong>${r.esperado.toLocaleString("es-CU")} ${moneda}</strong></div>
+    `;
+    document.getElementById("csEfectivoContado").value = "";
+    document.getElementById("csEfectivoContado").disabled = false;
+    document.getElementById("csResultado").innerHTML = "";
+    document.getElementById("csResultado").classList.add("oculto");
+    document.getElementById("btnConfirmarCierreSesion").classList.remove("oculto");
+    document.getElementById("btnAceptarCierreSesion").classList.add("oculto");
+    document.getElementById("modalCierreSesionCaja").classList.remove("oculto");
+}
+
+function cerrarModalCierreSesionCaja() {
+    document.getElementById("modalCierreSesionCaja").classList.add("oculto");
+    if (DB.sesionCajaActiva()) abrirSheetSesionCaja(); // no confirmó el cierre, volver al resumen
+}
+
+function confirmarCierreSesionCaja() {
+    const sesion = DB.sesionCajaActiva();
+    if (!sesion) { cerrarModalCierreSesionCaja(); return; }
+    const contadoVal = document.getElementById("csEfectivoContado").value;
+    if (contadoVal === "" || Number(contadoVal) < 0) { alert("⚠️ Ingresa el efectivo contado."); return; }
+    const cerrada = DB.cerrarCaja(contadoVal);
+    const moneda = DB.configuracion.moneda || "CUP";
+    const c = cerrada.cierre;
+    const cuadrada = Math.abs(c.diferencia) < 0.01;
+    const resEl = document.getElementById("csResultado");
+    resEl.classList.remove("oculto");
+    resEl.innerHTML = cuadrada
+        ? `<div class="cs-resultado cs-resultado-ok">✅ Caja cuadrada</div>`
+        : `<div class="cs-resultado cs-resultado-warn">⚠️ Diferencia de ${c.diferencia > 0 ? '+' : ''}${c.diferencia.toLocaleString("es-CU")} ${moneda}</div>`;
+    document.getElementById("csEfectivoContado").disabled = true;
+    document.getElementById("btnConfirmarCierreSesion").classList.add("oculto");
+    document.getElementById("btnAceptarCierreSesion").classList.remove("oculto");
+    renderEstadoCaja();
+}
+
+function aceptarCierreSesionCaja() {
+    document.getElementById("modalCierreSesionCaja").classList.add("oculto");
+    mostrarToastPOS({ texto: "🔒 Caja cerrada" });
+}
+
+// ── Historial de cajas (Fase 3) ──
+function abrirHistorialCaja() {
+    mostrarPantalla("pantallaHistorialCaja");
+    document.getElementById("btnFlotante").classList.add("ocultar-boton");
+    renderHistorialCaja();
+}
+
+function renderHistorialCaja() {
+    const moneda = DB.configuracion.moneda || "CUP";
+    const sesiones = [...DB.sesionesCaja].sort((a, b) => new Date(b.fechaApertura) - new Date(a.fechaApertura));
+    const listaEl = document.getElementById("histCajaLista");
+    if (sesiones.length === 0) {
+        listaEl.innerHTML = `<div class="cfg-row" style="cursor:default;"><div class="cfg-row-body"><span class="cfg-row-sub">Aún no has abierto ninguna caja</span></div></div>`;
+        return;
+    }
+    listaEl.innerHTML = sesiones.map((s, i) => {
+        const fecha = new Date(s.fechaApertura).toLocaleDateString("es-CU", { day: "2-digit", month: "2-digit", year: "numeric" });
+        let badge, sub;
+        if (s.estado === "abierta") {
+            badge = `<strong style="color:var(--accent);">🟢 Abierta</strong>`;
+            sub = "En curso";
+        } else {
+            const c = s.cierre;
+            const cuadrada = Math.abs(c.diferencia) < 0.01;
+            badge = cuadrada
+                ? `<strong style="color:var(--accent);">✅ Cuadrada</strong>`
+                : `<strong style="color:var(--warn);">⚠️ ${c.diferencia > 0 ? '+' : ''}${c.diferencia.toLocaleString("es-CU")} ${moneda}</strong>`;
+            sub = `${c.numVentas} ventas · ${c.ventasTotal.toLocaleString("es-CU")} ${moneda}`;
+        }
+        return `
+        <div class="cfg-row" onclick="abrirDetalleHistorialCaja('${s.id}')">
+            <div class="cfg-row-body">
+                <span class="cfg-row-titulo">Caja del ${fecha}</span>
+                <span class="cfg-row-sub">${sub}</span>
+            </div>
+            ${badge}
+        </div>${i < sesiones.length - 1 ? '<div class="cfg-row-sep"></div>' : ''}`;
+    }).join("");
+}
+
+function abrirDetalleHistorialCaja(id) {
+    const s = DB.sesionesCaja.find(x => x.id === id);
+    if (!s) return;
+    const moneda = DB.configuracion.moneda || "CUP";
+    const fechaA = new Date(s.fechaApertura).toLocaleString("es-CU", { dateStyle: "medium", timeStyle: "short" });
+    document.getElementById("histDetalleTitulo").innerText = "Caja del " + new Date(s.fechaApertura).toLocaleDateString("es-CU");
+
+    if (s.estado === "abierta") {
+        document.getElementById("histDetalleFechas").innerText = `Abierta: ${fechaA} · Responsable: ${s.responsable || "—"} · 🟢 Aún en curso`;
+        document.getElementById("histDetalleDesglose").innerHTML = `<div class="dashfin-row"><span>Fondo inicial</span><strong>${s.fondoInicial.toLocaleString("es-CU")} ${moneda}</strong></div>`;
+    } else {
+        const c = s.cierre;
+        const fechaC = new Date(s.fechaCierre).toLocaleString("es-CU", { dateStyle: "medium", timeStyle: "short" });
+        const cuadrada = Math.abs(c.diferencia) < 0.01;
+        document.getElementById("histDetalleFechas").innerText = `Abierta: ${fechaA} · Cerrada: ${fechaC} · Responsable: ${s.responsable || "—"}`;
+        document.getElementById("histDetalleDesglose").innerHTML = `
+            <div class="dashfin-row"><span>Fondo inicial</span><strong>${s.fondoInicial.toLocaleString("es-CU")} ${moneda}</strong></div>
+            <div class="dashfin-row"><span>Ventas efectivo</span><strong>${c.ventasEfectivo.toLocaleString("es-CU")} ${moneda}</strong></div>
+            <div class="dashfin-row"><span>Transferencia</span><strong>${c.ventasTransferencia.toLocaleString("es-CU")} ${moneda}</strong></div>
+            <div class="dashfin-row"><span>Fiado</span><strong>${c.ventasFiado.toLocaleString("es-CU")} ${moneda}</strong></div>
+            <div class="dashfin-row dashfin-resta"><span>− Gastos</span><strong>${c.gastos.toLocaleString("es-CU")} ${moneda}</strong></div>
+            <div class="dashfin-row dashfin-resta"><span>− Retiros</span><strong>${c.retiros.toLocaleString("es-CU")} ${moneda}</strong></div>
+            <div class="dashfin-sep"></div>
+            <div class="dashfin-row dashfin-subtotal"><span>Ventas totales</span><strong>${c.ventasTotal.toLocaleString("es-CU")} ${moneda}</strong></div>
+            <div class="dashfin-row dashfin-subtotal"><span>Ganancia (FIFO)</span><strong>${c.ganancia.toLocaleString("es-CU")} ${moneda}</strong></div>
+            <div class="dashfin-row dashfin-subtotal"><span>Transacciones</span><strong>${c.numVentas}</strong></div>
+            <div class="dashfin-row dashfin-subtotal"><span>Artículos vendidos</span><strong>${c.articulos}</strong></div>
+            <div class="dashfin-sep"></div>
+            <div class="dashfin-row"><span>Debe haber</span><strong>${c.esperado.toLocaleString("es-CU")} ${moneda}</strong></div>
+            <div class="dashfin-row"><span>Efectivo contado</span><strong>${c.contado.toLocaleString("es-CU")} ${moneda}</strong></div>
+            <div class="dashfin-row dashfin-total"><span>${cuadrada ? "✅ Caja cuadrada" : "⚠️ Diferencia"}</span><strong style="${cuadrada ? '' : 'color:var(--warn);'}">${c.diferencia > 0 ? '+' : ''}${c.diferencia.toLocaleString("es-CU")} ${moneda}</strong></div>
+        `;
+    }
+    document.getElementById("modalDetalleHistorialCaja").classList.remove("oculto");
+}
+
+function cerrarDetalleHistorialCaja() {
+    document.getElementById("modalDetalleHistorialCaja").classList.add("oculto");
 }
 
 function volverCajaPOS() {
@@ -2587,6 +2934,7 @@ function cargarSubConfig(sub) {
         document.getElementById("subMetodoPago").value = cfg.metodoPagoDefault || "efectivo";
         document.getElementById("subVentasSinStock").checked = cfg.ventasSinStock === true;
         document.getElementById("subSolicitarCliente").checked = cfg.solicitarCliente === true;
+        document.getElementById("subCajaObligatoria").checked = cfg.cajaObligatoria === true;
         document.getElementById("subNumAuto").checked = cfg.numAuto !== false;
         document.getElementById("subProxFactura").value = cfg.proxFactura || 1;
     }
@@ -2678,6 +3026,7 @@ function guardarVentas() {
         metodoPagoDefault: document.getElementById("subMetodoPago").value,
         ventasSinStock: document.getElementById("subVentasSinStock").checked,
         solicitarCliente: document.getElementById("subSolicitarCliente").checked,
+        cajaObligatoria: document.getElementById("subCajaObligatoria").checked,
         numAuto: document.getElementById("subNumAuto").checked,
         proxFactura: Number(document.getElementById("subProxFactura").value) || 1
     };
@@ -5665,6 +6014,11 @@ function generarMontosRapidos(total) {
 // ── Panel de pago (drawer deslizable sobre la barra fija) ──
 function togglePanelPago() {
     if (posCarritoItems.length === 0) { mostrarToastPOS({ texto: "⚠️ El carrito está vacío" }); return; }
+    if (DB.configuracion.cajaObligatoria && !DB.sesionCajaActiva()) {
+        mostrarToastPOS({ texto: "🔴 Debes abrir la caja antes de cobrar" });
+        abrirModalAperturaCaja();
+        return;
+    }
     const drawer = document.getElementById("posPagoDrawer");
     const abierto = !drawer.classList.contains("oculto");
     if (abierto) cerrarPanelPago();
@@ -5739,6 +6093,11 @@ function calcularMixto() {
 // fiado, sin duplicar la lógica de registro (FIFO/movimientos/factura).
 function procesarVentaPOS() {
     if (posCarritoItems.length === 0) { mostrarToastPOS({ texto: "⚠️ El carrito está vacío" }); return; }
+    if (DB.configuracion.cajaObligatoria && !DB.sesionCajaActiva()) {
+        mostrarToastPOS({ texto: "🔴 Debes abrir la caja antes de cobrar" });
+        abrirModalAperturaCaja();
+        return;
+    }
     const total = getTotalPOS();
 
     if (posMetodoActual === "efectivo") {
@@ -5828,6 +6187,7 @@ function ejecutarVentaPOS() {
             montoTransferencia: posMetodoActual === "mixto" ? (Number(document.getElementById("posMixtoTransferencia").value) || 0) : 0,
             cliente: cli ? cli.nombre : "",
             clienteId,
+            sesionCajaId: DB.caja.sesionActiva || null,
             nota: `Venta POS${item.descuento > 0 ? ` (desc. ${item.descuentoTipo === "monto" ? item.descuento + " " + moneda : item.descuento + "%"})` : ""}${posDescGlobalValor > 0 ? ` (desc. global ${posDescGlobalTipo === "monto" ? posDescGlobalValor + " " + moneda : posDescGlobalValor + "%"})` : ""}`,
             fecha: fechaVenta
         });

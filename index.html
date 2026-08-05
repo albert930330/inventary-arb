@@ -649,7 +649,20 @@
   <div class="header">
     <button class="btn-back" onclick="volverInicio()">‹</button>
     <div class="header-left"><h1>🛒 Caja POS</h1><p id="posSubtitulo">Nueva venta</p></div>
-    <button class="btn-tool" onclick="abrirCierreCaja()">🔒 Cierre</button>
+    <div style="display:flex;gap:8px;">
+      <button class="btn-tool" onclick="abrirHistorialCaja()">📜</button>
+      <button class="btn-tool" onclick="abrirCierreCaja()">🔒 Cierre</button>
+    </div>
+  </div>
+
+  <!-- Estado de la sesión de caja -->
+  <div id="cajaEstadoBar" class="caja-estado-bar caja-estado-cerrada" onclick="onTapEstadoCaja()">
+    <span id="cajaEstadoIcono">🔴</span>
+    <div class="caja-estado-texto">
+      <span id="cajaEstadoTitulo">Caja cerrada</span>
+      <span id="cajaEstadoSub">Toca para abrir caja</span>
+    </div>
+    <span id="cajaEstadoAccion" class="caja-estado-accion">Abrir caja</span>
   </div>
 
   <!-- Resumen siempre visible -->
@@ -814,6 +827,31 @@
   <div style="padding:0 20px 100px;">
     <button class="alm-btn-transferir" onclick="compartirCierreWhatsApp()">📲 Compartir por WhatsApp</button>
   </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!-- PANTALLA: HISTORIAL DE CAJAS                     -->
+<!-- ═══════════════════════════════════════════════ -->
+<div id="pantallaHistorialCaja" class="pantalla">
+  <div class="header">
+    <button class="btn-back" onclick="volverCajaPOS()">‹</button>
+    <div class="header-left"><h1>📜 Historial de Cajas</h1><p>Sesiones anteriores</p></div>
+  </div>
+  <div id="histCajaLista" class="cfg-grupo" style="margin:14px 20px 100px;"></div>
+</div>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!-- MODAL: DETALLE DE UNA CAJA CERRADA               -->
+<!-- ═══════════════════════════════════════════════ -->
+<div id="modalDetalleHistorialCaja" class="modal oculto">
+<div class="modal-contenido">
+  <div class="modal-header">
+    <h2 id="histDetalleTitulo">Caja</h2>
+    <button class="btn-cerrar" onclick="cerrarDetalleHistorialCaja()">✕</button>
+  </div>
+  <p class="cfg-row-sub" id="histDetalleFechas" style="margin-bottom:6px;"></p>
+  <div id="histDetalleDesglose" class="dashfin-cascada" style="margin:14px 0;"></div>
+</div>
 </div>
 
 <!-- ═══════════════════════════════════════════════ -->
@@ -1519,6 +1557,59 @@
 </div>
 
 <!-- ═══════════════════════════════════════════════ -->
+<!-- MODAL: APERTURA DE CAJA                          -->
+<!-- ═══════════════════════════════════════════════ -->
+<div id="modalAperturaCaja" class="modal oculto">
+<div class="modal-contenido">
+  <div class="modal-header">
+    <h2>🟢 Apertura de Caja</h2>
+    <button class="btn-cerrar" onclick="cerrarModalAperturaCaja()">✕</button>
+  </div>
+  <p class="cfg-row-sub" id="aperturaFechaHora" style="margin-bottom:10px;"></p>
+  <label>Responsable</label>
+  <input type="text" id="aperturaResponsable" placeholder="Ej: Albert">
+  <label>Fondo inicial (efectivo con el que arrancas) *</label>
+  <input type="number" id="aperturaFondoInicial" placeholder="0.00" min="0">
+  <button id="btnConfirmarApertura" onclick="confirmarAperturaCaja()">🟢 Abrir Caja</button>
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!-- MODAL: GASTO / RETIRO DE CAJA                    -->
+<!-- ═══════════════════════════════════════════════ -->
+<div id="modalMovimientoCaja" class="modal oculto">
+<div class="modal-contenido">
+  <div class="modal-header">
+    <h2 id="movCajaTitulo">💸 Salida de Efectivo</h2>
+    <button class="btn-cerrar" onclick="cerrarModalMovimientoCaja()">✕</button>
+  </div>
+  <label id="movCajaConceptoLabel">Concepto *</label>
+  <input type="text" id="movCajaConcepto" placeholder="Ej: Transporte">
+  <label>Monto *</label>
+  <input type="number" id="movCajaMonto" placeholder="0.00" min="0">
+  <button id="btnConfirmarMovCaja" onclick="confirmarMovimientoCaja()">💾 Guardar</button>
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!-- MODAL: CIERRE DE SESIÓN DE CAJA                  -->
+<!-- ═══════════════════════════════════════════════ -->
+<div id="modalCierreSesionCaja" class="modal oculto">
+<div class="modal-contenido">
+  <div class="modal-header">
+    <h2>🔒 Cierre de Caja</h2>
+    <button class="btn-cerrar" onclick="cerrarModalCierreSesionCaja()">✕</button>
+  </div>
+  <div id="csDesglose" class="dashfin-cascada" style="margin:14px 0;"></div>
+  <label>Efectivo contado *</label>
+  <input type="number" id="csEfectivoContado" placeholder="0.00" min="0">
+  <div id="csResultado" class="oculto"></div>
+  <button id="btnConfirmarCierreSesion" onclick="confirmarCierreSesionCaja()">🔒 Confirmar Cierre</button>
+  <button id="btnAceptarCierreSesion" class="oculto" onclick="aceptarCierreSesionCaja()">✅ Aceptar</button>
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════ -->
 <!-- PANTALLA: CONFIGURACIÓN (menú principal)       -->
 <!-- ═══════════════════════════════════════════════ -->
 <div id="pantallaConfiguracion" class="pantalla">
@@ -1886,6 +1977,14 @@
           <span class="cfg-row-sub">Pedir nombre del cliente al registrar salida</span>
         </div>
         <label class="cfg-toggle"><input type="checkbox" id="subSolicitarCliente"><span class="cfg-toggle-slider"></span></label>
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-toggle-row2">
+        <div class="cfg-row-body">
+          <span class="cfg-row-titulo">Exigir apertura de caja</span>
+          <span class="cfg-row-sub">No dejar vender en POS sin abrir caja primero</span>
+        </div>
+        <label class="cfg-toggle"><input type="checkbox" id="subCajaObligatoria"><span class="cfg-toggle-slider"></span></label>
       </div>
     </div>
 
@@ -2492,6 +2591,40 @@
       <button class="sa-btn sa-btn-purple" onclick="accionRapida('historial')"><span class="sa-btn-icon">📊</span><span>Historial</span></button>
     </div>
     <button class="sa-btn-eliminar" onclick="accionRapida('eliminar')">🗑️ Eliminar producto</button>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!-- SHEET: SESIÓN DE CAJA (resumen en vivo)          -->
+<!-- ═══════════════════════════════════════════════ -->
+<div id="sheetSesionCaja" class="sheet-overlay oculto" onclick="cerrarSheetSesionCajaSiOverlay(event)">
+  <div class="sheet-contenido sheet-acciones-contenido">
+    <div class="sheet-handle"></div>
+    <div class="sa-header">
+      <div class="sa-icono" id="scIconoBox"><span>🟢</span></div>
+      <div class="sa-info"><h3>Caja abierta</h3><div class="sa-meta"><span>Desde <span id="scHoraApertura">—</span></span><span class="sa-sep">·</span><span>Fondo: <span id="scFondoInicial">—</span></span></div></div>
+      <button class="btn-cerrar" onclick="cerrarSheetSesionCaja()">✕</button>
+    </div>
+
+    <div class="sc-stats-grid">
+      <div class="sc-stat-item"><span>💵 Efectivo</span><strong id="scEfectivo">0</strong></div>
+      <div class="sc-stat-item"><span>📱 Transferencia</span><strong id="scTransferencia">0</strong></div>
+      <div class="sc-stat-item"><span>🤝 Fiado</span><strong id="scFiado">0</strong></div>
+      <div class="sc-stat-item"><span>🧾 Ventas</span><strong id="scVentas">0</strong></div>
+      <div class="sc-stat-item"><span>📦 Artículos</span><strong id="scArticulos">0</strong></div>
+      <div class="sc-stat-item sc-stat-warn"><span>💸 Gastos</span><strong id="scGastos">0</strong></div>
+    </div>
+    <div class="sc-stat-item sc-stat-warn sc-stat-full"><span>🏦 Retiros de caja</span><strong id="scRetiros">0</strong></div>
+
+    <div class="sa-grid" style="grid-template-columns:1fr 1fr;">
+      <button class="sa-btn sa-btn-red" onclick="abrirModalMovimientoCaja('gasto')"><span class="sa-btn-icon">💸</span><span>Salida de efectivo</span></button>
+      <button class="sa-btn sa-btn-gold" onclick="abrirModalMovimientoCaja('retiro')"><span class="sa-btn-icon">🏦</span><span>Retiro</span></button>
+    </div>
+
+    <div class="cfg-grupo-label" style="margin-top:16px;">MOVIMIENTOS DE CAJA</div>
+    <div id="scMovimientosLista" class="cfg-grupo"></div>
+
+    <button class="sa-btn-eliminar" style="background:rgba(0,232,150,0.1);border-color:rgba(0,232,150,0.25);color:var(--accent);" onclick="abrirModalCierreSesionCaja()">🔒 Cerrar caja</button>
   </div>
 </div>
 
