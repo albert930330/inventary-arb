@@ -2,19 +2,38 @@
 // INVENTARY ARB
 // ═══════════════════════════════════════════════
 const DB = {
+    // Lee y parsea una clave de localStorage de forma segura. Si el JSON
+    // está corrupto (por ejemplo, la app se cerró a mitad de una
+    // escritura), en vez de que toda la app deje de cargar, se guarda
+    // una copia del texto dañado bajo otra clave (por si se puede
+    // recuperar a mano) y se usa el valor por defecto para esa sección.
+    _clavesCorruptas: [],
+    _cargarClave(key, valorDefecto) {
+        const crudo = localStorage.getItem(key);
+        if (crudo === null) return valorDefecto;
+        try {
+            return JSON.parse(crudo);
+        } catch (e) {
+            try { localStorage.setItem(key + "_corrupto_" + Date.now(), crudo); } catch (e2) {}
+            this._clavesCorruptas.push(key);
+            return valorDefecto;
+        }
+    },
+
     cargar() {
-        this.productos = JSON.parse(localStorage.getItem("productos")) || [];
-        this.movimientos = JSON.parse(localStorage.getItem("movimientos")) || [];
-        this.gastos = JSON.parse(localStorage.getItem("gastos")) || [];
-        this.caja = JSON.parse(localStorage.getItem("caja")) || { sesionActiva: null };
-        this.sesionesCaja = JSON.parse(localStorage.getItem("sesionesCaja")) || [];
-        this.clientes = JSON.parse(localStorage.getItem("clientes")) || [];
-        this.proveedores = JSON.parse(localStorage.getItem("proveedores")) || [];
-        this.almacenes = JSON.parse(localStorage.getItem("almacenes")) || [
+        this._clavesCorruptas = [];
+        this.productos = this._cargarClave("productos", []);
+        this.movimientos = this._cargarClave("movimientos", []);
+        this.gastos = this._cargarClave("gastos", []);
+        this.caja = this._cargarClave("caja", { sesionActiva: null });
+        this.sesionesCaja = this._cargarClave("sesionesCaja", []);
+        this.clientes = this._cargarClave("clientes", []);
+        this.proveedores = this._cargarClave("proveedores", []);
+        this.almacenes = this._cargarClave("almacenes", [
             { id: "alm1", nombre: "Almacén principal" },
             { id: "alm2", nombre: "Tienda" }
-        ];
-        this.configuracion = JSON.parse(localStorage.getItem("configuracion")) || {
+        ]);
+        this.configuracion = this._cargarClave("configuracion", {
             nombreNegocio: "Mi Negocio", emoji: "🏪", propietario: "",
             telefono: "", direccion: "", municipio: "", provincia: "",
             regimenFiscal: "TCP", numONAT: "", actividad: "", piePagina: "",
@@ -28,7 +47,27 @@ const DB = {
             ultimoRespaldo: "",
             tamanoTexto: "normal", animaciones: true, glow: true,
             formatoFecha: "dd/mm/yyyy", separadorDecimal: "punto"
-        };
+        });
+        // Si alguna de las estructuras no vino en la forma esperada (array
+        // donde debía haber un array, objeto donde debía haber un objeto),
+        // también se trata como corrupta en vez de dejar que el resto de
+        // la app falle más adelante al intentar usarla como tal.
+        if (!Array.isArray(this.productos)) { this.productos = []; this._clavesCorruptas.push("productos"); }
+        if (!Array.isArray(this.movimientos)) { this.movimientos = []; this._clavesCorruptas.push("movimientos"); }
+        if (!Array.isArray(this.gastos)) { this.gastos = []; this._clavesCorruptas.push("gastos"); }
+        if (!Array.isArray(this.sesionesCaja)) { this.sesionesCaja = []; this._clavesCorruptas.push("sesionesCaja"); }
+        if (!Array.isArray(this.clientes)) { this.clientes = []; this._clavesCorruptas.push("clientes"); }
+        if (!Array.isArray(this.proveedores)) { this.proveedores = []; this._clavesCorruptas.push("proveedores"); }
+        if (!Array.isArray(this.almacenes) || this.almacenes.length === 0) {
+            this.almacenes = [{ id: "alm1", nombre: "Almacén principal" }, { id: "alm2", nombre: "Tienda" }];
+            this._clavesCorruptas.push("almacenes");
+        }
+        if (!this.caja || typeof this.caja !== "object") { this.caja = { sesionActiva: null }; this._clavesCorruptas.push("caja"); }
+        if (!this.configuracion || typeof this.configuracion !== "object") {
+            this.configuracion = { nombreNegocio: "Mi Negocio", moneda: "CUP" };
+            this._clavesCorruptas.push("configuracion");
+        }
+
         this.productos = this.productos.map((p, i) => ({
             ...p, id: p.id || "prod_" + Date.now() + "_" + i
         }));
@@ -42,10 +81,40 @@ const DB = {
             permiteTransferencias: a.permiteTransferencias !== false,
             activo: a.activo !== false
         }));
-        this.guardar();
+
+        if (this._clavesCorruptas.length > 0) {
+            // No sobrescribimos silenciosamente: avisamos apenas la pantalla
+            // esté lista, para que el negocio sepa que esa sección se
+            // reinició y pueda restaurar un respaldo si lo tiene.
+            const claves = this._clavesCorruptas.join(", ");
+            setTimeout(() => alert(
+                "⚠️ Se detectaron datos dañados al abrir la app en: " + claves +
+                ".\n\nEsa parte se reinició vacía para poder abrir la app con normalidad. " +
+                "Se guardó una copia de los datos originales por si se pueden recuperar.\n\n" +
+                "Si tienes un respaldo reciente, restáuralo desde Configuración → Respaldo."
+            ), 500);
+        } else {
+            this.guardar();
+        }
     },
 
+    // guardar() se llama decenas de veces dentro de una sola operación
+    // (ej. una venta con varios productos llama actualizarProducto +
+    // registrarMovimiento por cada item). En vez de reescribir las 9
+    // tablas completas de localStorage en cada llamada, agrupamos todas
+    // las llamadas que ocurren en la misma operación y escribimos una
+    // sola vez, apenas termina el código síncrono actual (microtask).
+    // Esto no cambia el comportamiento para quien usa la app: los datos
+    // quedan guardados igual de rápido (unos milisegundos después),
+    // pero se ahorran escrituras redundantes.
+    _guardarProgramado: false,
     guardar() {
+        if (this._guardarProgramado) return;
+        this._guardarProgramado = true;
+        Promise.resolve().then(() => this._guardarInmediato());
+    },
+    _guardarInmediato() {
+        this._guardarProgramado = false;
         localStorage.setItem("productos", JSON.stringify(this.productos));
         localStorage.setItem("movimientos", JSON.stringify(this.movimientos));
         localStorage.setItem("gastos", JSON.stringify(this.gastos));
@@ -127,9 +196,14 @@ const DB = {
     },
 
     // Consume cantidad del lote más viejo hacia el más nuevo (FIFO). Devuelve el costo real total consumido.
+    // cantidadConsumida = lo que realmente se pudo sacar de los lotes.
+    // Si hay menos stock del que se pidió (solo puede pasar con "Vender sin
+    // stock" activado, o si algo dejó los lotes desincronizados), faltante
+    // será mayor a 0 y completo será false — quien llama a esta función
+    // debe decidir qué hacer (avisar, o registrar solo lo realmente vendido).
     consumirLotesFIFO(productoId, cantidadAConsumir) {
         const p = this.buscarProducto(productoId);
-        if (!p || !p.usaFifo || !p.lotes) return { costoTotal: 0, detalle: [] };
+        if (!p || !p.usaFifo || !p.lotes) return { costoTotal: 0, detalle: [], cantidadConsumida: 0, faltante: cantidadAConsumir, completo: cantidadAConsumir <= 0 };
         let restante = cantidadAConsumir;
         let costoTotal = 0;
         const detalle = [];
@@ -143,7 +217,13 @@ const DB = {
         }
         this.sincronizarLotes(p);
         this.guardar();
-        return { costoTotal, detalle, costoUnitarioPromedio: cantidadAConsumir > 0 ? costoTotal / cantidadAConsumir : 0 };
+        const cantidadConsumida = cantidadAConsumir - restante;
+        return {
+            costoTotal, detalle, cantidadConsumida,
+            faltante: Math.max(0, restante),
+            completo: restante <= 0,
+            costoUnitarioPromedio: cantidadConsumida > 0 ? costoTotal / cantidadConsumida : 0
+        };
     },
 
     // Devuelve cantidad al lote más viejo (usado al editar/revertir un movimiento)
@@ -330,6 +410,16 @@ const DB = {
         return diasDeuda > 30 ? "rojo" : diasDeuda > 7 ? "amarillo" : "verde";
     }
 };
+
+// Si la app se cierra o pasa a segundo plano justo en el instante en que
+// hay un guardado pendiente (programado pero aún no ejecutado), lo
+// forzamos de inmediato para no perder datos.
+document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden" && DB._guardarProgramado) DB._guardarInmediato();
+});
+window.addEventListener("pagehide", () => {
+    if (DB._guardarProgramado) DB._guardarInmediato();
+});
 
 // ═══════════════════════════════════════════════
 // ESTADO
@@ -529,6 +619,131 @@ function mostrarPantalla(id, direccion = "adelante") {
     pantalla.classList.add("activa");
     pantalla.classList.add(direccion === "atras" ? "slide-atras" : "slide-adelante");
     document.querySelectorAll(".nav-item").forEach(b => b.classList.remove("active"));
+    sincronizarHistorialPantalla(id, direccion);
+}
+
+// ═══════════════════════════════════════════════
+// BOTÓN ATRÁS FÍSICO / GESTO DEL SISTEMA (Android)
+// ═══════════════════════════════════════════════
+// Objetivo: que el botón/gesto de atrás del teléfono haga lo mismo que
+// el botón "‹" de la esquina, en vez de cerrar la app o el navegador.
+//
+// Cómo funciona (sin tocar ninguna de las funciones abrir*/cerrar*/volver*
+// que ya existen en el resto del archivo):
+//  - Cada vez que se entra a una pantalla "hija" (Almacenes, Gastos,
+//    Clientes, un perfil, etc.) se agrega una entrada al historial del
+//    navegador (history.pushState). Las 4 pestañas del menú inferior
+//    (Inicio/Inventario/Movimientos/Historial) NO cuentan como "hijas".
+//  - Cada vez que se abre un modal o un sheet (cualquier elemento con
+//    clase "modal" o "sheet-overlay") se detecta automáticamente porque
+//    todos ellos se muestran/ocultan agregando o quitando la clase
+//    "oculto" — así que un único observador cubre TODOS los modales y
+//    sheets presentes y futuros, sin necesidad de listarlos a mano.
+//  - Cuando el usuario pulsa el botón/gesto de atrás del sistema,
+//    buscamos la capa abierta más reciente (pantalla, modal o sheet) y
+//    le damos clic a su propio botón de cerrar/atrás (".btn-back",
+//    ".btn-cerrar" o cualquier botón con onclick="cerrar...()" /
+//    "volver...()"), reutilizando toda la lógica de limpieza que esa
+//    función ya tenía (detener el escáner, resetear variables, etc.).
+//  - Si el botón de la esquina se usa en vez del botón físico, el propio
+//    sistema detecta el cierre y sincroniza el historial para que no
+//    queden entradas "fantasma".
+
+const PANTALLAS_RAIZ_ARB = new Set(["pantallaInicio", "pantallaInventario", "pantallaMovimientos", "pantallaHistorial"]);
+let pilaCapasArb = [];          // pila de ids (pantallas hijas, modales, sheets) abiertos actualmente
+let navegandoPorPopstateArb = false; // true mientras procesamos un popstate real (botón físico)
+let popstatesEsperadosArb = 0;  // cuántos popstate() vamos a recibir por nuestras PROPIAS llamadas a history.back()/go()
+
+// history.back()/history.go() disparan un evento "popstate" real, sin
+// distinguir si lo llamó el usuario con el botón físico o nuestro propio
+// código (por ejemplo, al cerrar un sheet desde su botón "✕" en pantalla).
+// Sin este contador, cerrar algo desde la app generaba un popstate "eco"
+// que el sistema interpretaba como una pulsación real del botón atrás, y
+// terminaba cerrando TAMBIÉN la capa de abajo (por ejemplo: cerrar el
+// buscador de productos del POS también cerraba la pantalla de Caja POS).
+function retrocederHistorialArb(pasos) {
+    popstatesEsperadosArb += pasos;
+    if (pasos === 1) history.back(); else history.go(-pasos);
+}
+
+function sincronizarHistorialPantalla(id, direccion) {
+    if (direccion === "atras") {
+        if (pilaCapasArb.length > 0) {
+            pilaCapasArb.pop();
+            if (!navegandoPorPopstateArb) retrocederHistorialArb(1);
+        }
+    } else if (!PANTALLAS_RAIZ_ARB.has(id)) {
+        if (!navegandoPorPopstateArb) {
+            pilaCapasArb.push(id);
+            history.pushState({ capaArb: id }, "", "");
+        }
+    } else if (pilaCapasArb.length > 0) {
+        // Se navegó "adelante" directo a una pestaña raíz habiendo capas
+        // pendientes (caso raro de seguridad): limpiamos y sincronizamos.
+        const n = pilaCapasArb.length;
+        pilaCapasArb = [];
+        if (!navegandoPorPopstateArb) retrocederHistorialArb(n);
+    }
+}
+
+function alAbrirCapaOverlayArb(id) {
+    if (navegandoPorPopstateArb) return;
+    if (pilaCapasArb.length && pilaCapasArb[pilaCapasArb.length - 1] === id) return;
+    pilaCapasArb.push(id);
+    history.pushState({ capaArb: id }, "", "");
+}
+
+function alCerrarCapaOverlayArb(id) {
+    const idx = pilaCapasArb.lastIndexOf(id);
+    if (idx === -1) return;
+    pilaCapasArb.splice(idx, 1);
+    if (!navegandoPorPopstateArb) retrocederHistorialArb(1);
+}
+
+function iniciarBackButtonFisicoArb() {
+    const observador = new MutationObserver((mutaciones) => {
+        for (const m of mutaciones) {
+            const el = m.target;
+            if (!(el instanceof HTMLElement) || !el.id) continue;
+            const visible = !el.classList.contains("oculto");
+            if (visible) alAbrirCapaOverlayArb(el.id);
+            else alCerrarCapaOverlayArb(el.id);
+        }
+    });
+    // .pos-pago-drawer: el panel de pago del POS usa su propio diseño de
+    // cajón (no es un .modal ni un .sheet-overlay clásico), pero también
+    // debe cerrarse solo él con el botón atrás, sin arrastrar la pantalla
+    // de Caja POS ni vaciar el carrito.
+    document.querySelectorAll(".modal, .sheet-overlay, .pos-pago-drawer").forEach(el => {
+        if (el.id) observador.observe(el, { attributes: true, attributeFilter: ["class"] });
+    });
+
+    window.addEventListener("popstate", () => {
+        if (popstatesEsperadosArb > 0) { popstatesEsperadosArb--; return; }
+        if (!pilaCapasArb.length) return; // nada abierto por nuestro sistema: comportamiento normal
+        const idTope = pilaCapasArb[pilaCapasArb.length - 1];
+        const el = document.getElementById(idTope);
+        navegandoPorPopstateArb = true;
+        if (el) {
+            const boton = el.querySelector('.btn-back, .btn-cerrar, [onclick^="cerrar"], [onclick^="volver"]');
+            if (boton) {
+                boton.click();
+            } else {
+                pilaCapasArb.pop();
+                if (el.classList.contains("pantalla")) el.classList.remove("activa");
+                else el.classList.add("oculto");
+            }
+        } else {
+            pilaCapasArb.pop();
+        }
+        navegandoPorPopstateArb = false;
+    });
+}
+
+if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", iniciarBackButtonFisicoArb);
+} else {
+    iniciarBackButtonFisicoArb();
 }
 
 function volverInicio() {
@@ -2672,6 +2887,7 @@ document.getElementById("btnRegistrarMov").addEventListener("click", () => {
     }
 
     let nuevaCantidad, costoRealConsumido = null;
+    let cantidadRegistrar = cantidad;
 
     if (p.usaFifo) {
         if (tipoMovActual === "entrada") {
@@ -2679,10 +2895,17 @@ document.getElementById("btnRegistrarMov").addEventListener("click", () => {
         } else {
             const resultado = DB.consumirLotesFIFO(productoId, cantidad);
             costoRealConsumido = resultado.costoUnitarioPromedio;
+            if (!resultado.completo) {
+                // Solo puede pasar con "Vender sin stock" activado: los lotes
+                // no tenían toda la cantidad pedida. Registramos únicamente lo
+                // que de verdad salió del inventario, no lo solicitado.
+                cantidadRegistrar = resultado.cantidadConsumida;
+                alert(`⚠️ Stock insuficiente en los lotes: solo había ${resultado.cantidadConsumida} ${p.unidad||""} disponibles de las ${cantidad} solicitadas.\n\nSe registrará la salida por ${resultado.cantidadConsumida} ${p.unidad||""}, que es lo que realmente se descontó del inventario.`);
+            }
         }
         nuevaCantidad = DB.buscarProducto(productoId).cantidad;
     } else {
-        nuevaCantidad = tipoMovActual === "entrada" ? p.cantidad + cantidad : p.cantidad - cantidad;
+        nuevaCantidad = tipoMovActual === "entrada" ? p.cantidad + cantidad : Math.max(0, p.cantidad - cantidad);
         DB.actualizarProducto(productoId, { cantidad: nuevaCantidad });
     }
 
@@ -2692,7 +2915,7 @@ document.getElementById("btnRegistrarMov").addEventListener("click", () => {
         factura: document.getElementById("movFactura").value,
         nota: document.getElementById("movNota").value
     } : {
-        cantidad, precioUnitario: precio,
+        cantidad: cantidadRegistrar, precioUnitario: precio,
         costoReal: costoRealConsumido,
         motivo: document.getElementById("movMotivo").value,
         metodoPago: document.getElementById("movMetodoPago").value,
@@ -2725,10 +2948,10 @@ document.getElementById("btnRegistrarMov").addEventListener("click", () => {
     if (tipoMovActual === "salida" && DB.configuracion.notifAlSalida && nuevaCantidad <= p.stockMinimo) {
         enviarNotificacion(`⚠️ Stock bajo: ${p.nombre}`, `Quedan ${nuevaCantidad} ${p.unidad||"unidades"}`);
     }
-    let msg = `${tipoMovActual === "entrada" ? "📥" : "📤"} Registrado.\n${p.nombre}: ${cantidad} ${p.unidad||""}\nNuevo stock: ${nuevaCantidad}`;
+    let msg = `${tipoMovActual === "entrada" ? "📥" : "📤"} Registrado.\n${p.nombre}: ${cantidadRegistrar} ${p.unidad||""}\nNuevo stock: ${nuevaCantidad}`;
     if (costoRealConsumido !== null) {
         const moneda = DB.configuracion.moneda || "CUP";
-        const gananciaReal = (precio - costoRealConsumido) * cantidad;
+        const gananciaReal = (precio - costoRealConsumido) * cantidadRegistrar;
         msg += `\nCosto real: ${costoRealConsumido.toLocaleString("es-CU")} ${moneda}/u\nGanancia real: ${gananciaReal.toLocaleString("es-CU")} ${moneda}`;
     }
     alert(msg);
@@ -3176,10 +3399,12 @@ function verificarStockAlIniciar() {
 // ═══════════════════════════════════════════════
 function exportarRespaldo() {
     const respaldo = {
-        version: "1.0.0", fecha: new Date().toISOString(),
+        version: "1.1.0", fecha: new Date().toISOString(),
         negocio: DB.configuracion.nombreNegocio || "Mi Negocio",
         productos: DB.productos, movimientos: DB.movimientos,
-        almacenes: DB.almacenes, configuracion: DB.configuracion
+        almacenes: DB.almacenes, configuracion: DB.configuracion,
+        gastos: DB.gastos, clientes: DB.clientes, proveedores: DB.proveedores,
+        caja: DB.caja, sesionesCaja: DB.sesionesCaja
     };
     DB.configuracion.ultimoRespaldo = respaldo.fecha;
     DB.guardar();
@@ -3192,7 +3417,7 @@ function exportarRespaldo() {
     a.download = `inventary-arb-respaldo-${new Date().toISOString().slice(0,10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
-    mostrarToast("✅ Respaldo exportado");
+    mostrarToast("✅ Respaldo exportado (no incluye fotos de productos)");
 }
 
 function importarRespaldo(e) {
@@ -3202,14 +3427,32 @@ function importarRespaldo(e) {
     reader.onload = (ev) => {
         try {
             const datos = JSON.parse(ev.target.result);
-            if (!datos.productos || !datos.movimientos) { alert("⚠️ Archivo de respaldo inválido."); return; }
-            DB.productos = datos.productos || [];
-            DB.movimientos = datos.movimientos || [];
-            DB.almacenes = datos.almacenes || DB.almacenes;
-            DB.configuracion = { ...DB.configuracion, ...datos.configuracion };
+            // Validación mínima del formato antes de reemplazar nada
+            if (typeof datos !== "object" || datos === null) { alert("⚠️ Archivo de respaldo inválido."); return; }
+            if (!Array.isArray(datos.productos) || !Array.isArray(datos.movimientos)) {
+                alert("⚠️ Archivo de respaldo inválido: falta la lista de productos o movimientos.");
+                return;
+            }
+            const camposLista = ["gastos", "clientes", "proveedores", "sesionesCaja"];
+            for (const campo of camposLista) {
+                if (datos[campo] !== undefined && !Array.isArray(datos[campo])) {
+                    alert(`⚠️ Archivo de respaldo inválido: "${campo}" no tiene el formato esperado.`);
+                    return;
+                }
+            }
+            DB.productos = datos.productos;
+            DB.movimientos = datos.movimientos;
+            DB.almacenes = Array.isArray(datos.almacenes) ? datos.almacenes : DB.almacenes;
+            DB.configuracion = { ...DB.configuracion, ...(datos.configuracion || {}) };
+            // Compatibilidad con respaldos antiguos (v1.0.0) que no incluían estos campos
+            DB.gastos = datos.gastos || [];
+            DB.clientes = datos.clientes || [];
+            DB.proveedores = datos.proveedores || [];
+            DB.sesionesCaja = datos.sesionesCaja || [];
+            DB.caja = (datos.caja && typeof datos.caja === "object") ? datos.caja : { sesionActiva: null };
             DB.guardar();
             aplicarConfiguracion();
-            alert(`✅ Datos restaurados.\n${DB.productos.length} productos\n${DB.movimientos.length} movimientos`);
+            alert(`✅ Datos restaurados.\n${DB.productos.length} productos\n${DB.movimientos.length} movimientos\n${DB.clientes.length} clientes\n${DB.proveedores.length} proveedores\n${DB.gastos.length} gastos${datos.version === "1.0.0" ? "\n\nNota: este respaldo es de una versión anterior sin clientes/proveedores/gastos/caja, así que esas secciones quedaron vacías." : ""}`);
             actualizarInicio();
             volverConfig();
         } catch { alert("⚠️ Error al leer el archivo."); }
@@ -4874,7 +5117,17 @@ function calcularTributos(ingresosMes, gastosMes, mes, anio) {
         { desde: 50000, hasta: Infinity, tasa: 35 }
     ];
     const impAnual = calcularEscala(baseAnual, escalaAnual);
-    const pagadosEnMeses = (resultados["0510122"].importe) * (mes + 1); // estimado
+    // Antes esto multiplicaba el impuesto del MES ACTUAL por la cantidad de
+    // meses transcurridos, lo cual solo es correcto si el ingreso fuera
+    // idéntico todos los meses. Ahora se recalcula el 0510122 real de cada
+    // mes del año (con sus propios ingresos) y se suman, que es consistente
+    // con el historial real de ventas registrado en la app.
+    let pagadosEnMeses = 0;
+    for (let m = 0; m <= mes; m++) {
+        const ingresosMesM = ingresosDelMes(m, anio);
+        const baseMesM = Math.max(0, ingresosMesM - cfg.minExentoMensual);
+        pagadosEnMeses += baseMesM * (cfg.tasa0510122 / 100);
+    }
     const saldoAnual = Math.max(0, impAnual - pagadosEnMeses);
     resultados["0530222"] = {
         codigo: "0530222", nombre: "Declaración Jurada — Ingresos Personales",
@@ -4887,10 +5140,10 @@ function calcularTributos(ingresosMes, gastosMes, mes, anio) {
             { label: "= Base imponible", valor: baseAnual },
             { label: "× Escala progresiva", valor: null },
             { label: "Impuesto calculado", valor: impAnual },
-            { label: "− Ya pagado en 0510122 (estimado)", valor: pagadosEnMeses },
+            { label: "− Ya pagado en 0510122 (recalculado mes a mes)", valor: pagadosEnMeses },
             { label: "Saldo estimado a pagar", valor: saldoAnual, destacado: true }
         ],
-        baseLegal: "Tributo 0530222: Declaración jurada anual. Descuenta mínimo exento 39,120 CUP y 100% de gastos documentados. Bonificación 5% si paga antes del 28 de febrero. Vence el 30 de abril del año siguiente.",
+        baseLegal: "Tributo 0530222: Declaración jurada anual. Descuenta mínimo exento 39,120 CUP y 100% de gastos documentados. Bonificación 5% si paga antes del 28 de febrero. Vence el 30 de abril del año siguiente. El \"ya pagado\" se estima recalculando el 0510122 de cada mes con sus ingresos reales — verifica siempre contra tus comprobantes de pago reales antes de declarar.",
         esAplicable: true
     };
 
@@ -6165,26 +6418,57 @@ function ejecutarVentaPOS() {
     const numeroFactura = generarNumeroFacturaPOS();
     const itemsFactura = [];
 
-    posCarritoItems.forEach(item => {
+    // Montos de efectivo/transferencia a nivel de FACTURA (no por línea).
+    // Antes se guardaba el monto completo de la factura en CADA producto
+    // vendido, así que una factura de varios productos hacía que los
+    // reportes sumaran el efectivo/transferencia varias veces (una por
+    // cada línea). Ahora se calcula una sola vez y solo se adjunta al
+    // primer movimiento de la factura; el resto queda en 0.
+    // También: para pago en efectivo puro se guarda el TOTAL de la venta
+    // (lo que realmente entra neto a la caja), no el dinero que entregó
+    // el cliente — ese monto ya incluye el cambio que se le devuelve, así
+    // que guardarlo tal cual inflaba el efectivo registrado.
+    const montoEfectivoFactura = posMetodoActual === "mixto"
+        ? (Number(document.getElementById("posMixtoEfectivo").value) || 0)
+        : (posMetodoActual === "efectivo" ? total : 0);
+    const montoTransferenciaFactura = posMetodoActual === "mixto"
+        ? (Number(document.getElementById("posMixtoTransferencia").value) || 0)
+        : 0;
+
+    const avisosStockPOS = [];
+
+    posCarritoItems.forEach((item, idx) => {
         const precioConDesc = aplicarDescuentoGlobalATotal(precioConDescuentoItem(item));
         let costoReal = null;
+        let cantidadVendida = item.cantidad;
 
         if (item.producto.usaFifo) {
             const resultado = DB.consumirLotesFIFO(item.producto.id, item.cantidad);
             costoReal = resultado.costoUnitarioPromedio;
+            if (!resultado.completo) {
+                // Solo puede pasar con "Vender sin stock" activado: se registra
+                // únicamente lo que de verdad salió de los lotes, no lo pedido.
+                cantidadVendida = resultado.cantidadConsumida;
+                avisosStockPOS.push(`${item.producto.nombre}: solo había ${resultado.cantidadConsumida} de ${item.cantidad} ${item.producto.unidad||""}`);
+            }
         } else {
             const prod = DB.buscarProducto(item.producto.id);
-            DB.actualizarProducto(item.producto.id, { cantidad: prod.cantidad - item.cantidad });
+            const nuevaCant = Math.max(0, prod.cantidad - item.cantidad);
+            if (item.cantidad > prod.cantidad) {
+                cantidadVendida = prod.cantidad;
+                avisosStockPOS.push(`${item.producto.nombre}: solo había ${prod.cantidad} de ${item.cantidad} ${item.producto.unidad||""}`);
+            }
+            DB.actualizarProducto(item.producto.id, { cantidad: nuevaCant });
         }
 
         DB.registrarMovimiento("salida", item.producto.id, {
-            cantidad: item.cantidad,
+            cantidad: cantidadVendida,
             precioUnitario: precioConDesc,
             costoReal,
             factura: numeroFactura,
             metodoPago: posMetodoActual === "mixto" ? "mixto" : posMetodoActual,
-            montoEfectivo: posMetodoActual === "mixto" ? (Number(document.getElementById("posMixtoEfectivo").value) || 0) : (posMetodoActual === "efectivo" ? (Number(document.getElementById("posEfectivoRecibido").value) || 0) : 0),
-            montoTransferencia: posMetodoActual === "mixto" ? (Number(document.getElementById("posMixtoTransferencia").value) || 0) : 0,
+            montoEfectivo: idx === 0 ? montoEfectivoFactura : 0,
+            montoTransferencia: idx === 0 ? montoTransferenciaFactura : 0,
             cliente: cli ? cli.nombre : "",
             clienteId,
             sesionCajaId: DB.caja.sesionActiva || null,
@@ -6194,10 +6478,14 @@ function ejecutarVentaPOS() {
 
         itemsFactura.push({
             nombre: item.producto.nombre,
-            cantidad: item.cantidad,
-            subtotalTexto: (precioConDesc * item.cantidad).toLocaleString("es-CU") + " " + moneda
+            cantidad: cantidadVendida,
+            subtotalTexto: (precioConDesc * cantidadVendida).toLocaleString("es-CU") + " " + moneda
         });
     });
+
+    if (avisosStockPOS.length > 0) {
+        alert(`⚠️ Algunos productos no tenían todo el stock pedido y se vendió solo lo disponible:\n\n${avisosStockPOS.join("\n")}`);
+    }
 
     if (posMetodoActual !== "fiado") {
         DB.configuracion.metodoPagoDefault = posMetodoActual;
