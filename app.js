@@ -6375,7 +6375,16 @@ function procesarVentaPOS() {
     if (posMetodoActual === "mixto") {
         const ef = Number(document.getElementById("posMixtoEfectivo").value) || 0;
         const tr = Number(document.getElementById("posMixtoTransferencia").value) || 0;
-        if (ef + tr < total) { mostrarToastPOS({ texto: "⚠️ El monto total no cubre la venta" }); return; }
+        // Antes solo se rechazaba si (ef + tr) quedaba por debajo del total,
+        // así que se podía cobrar de más (ej. 1,500 en una venta de 1,000) y
+        // ese exceso quedaba registrado como si fuera dinero real en caja.
+        // En un pago mixto no existe "cambio" para la transferencia, así
+        // que la suma debe coincidir exactamente con el total (con un
+        // margen mínimo de un centavo por redondeo).
+        if (Math.abs((ef + tr) - total) > 0.01) {
+            mostrarToastPOS({ texto: (ef + tr) < total ? "⚠️ El monto ingresado no cubre el total" : "⚠️ El monto ingresado supera el total de la venta" });
+            return;
+        }
     }
 
     ejecutarVentaPOS();
@@ -6410,13 +6419,66 @@ function generarNumeroFacturaPOS() {
 }
 
 function ejecutarVentaPOS() {
-    const total = getTotalPOS();
+    const totalSolicitado = getTotalPOS();
     const moneda = DB.configuracion.moneda || "CUP";
     const clienteId = posMetodoActual === "fiado" ? document.getElementById("posClienteId").value : null;
     const cli = clienteId ? DB.buscarCliente(clienteId) : null;
     const fechaVenta = new Date().toISOString();
+
+    // ── Revalidación final de stock, justo antes de vender ──
+    // Los controles del carrito (cambiar cantidad, agregar producto) ya
+    // impiden pedir más de lo disponible en el momento de tocarlos, pero
+    // entre que se arma el carrito y se pulsa "Confirmar cobro" el stock
+    // podría haber cambiado (otra operación, otra pestaña, etc.). Esta es
+    // la comprobación definitiva, justo antes de tocar el inventario.
+    // Con "Vender sin stock" DESACTIVADO (opción por defecto): si algo ya
+    // no alcanza, se cancela la venta COMPLETA — no se registra nada ni se
+    // descuenta ningún producto. Nunca se vende "una parte" en silencio.
+    if (!DB.configuracion.ventasSinStock) {
+        const faltantes = [];
+        for (const item of posCarritoItems) {
+            const prodActual = DB.buscarProducto(item.producto.id);
+            if (!prodActual) { faltantes.push(`${item.producto.nombre}: ya no existe en el inventario`); continue; }
+            const disponible = prodActual.usaFifo
+                ? (prodActual.lotes || []).reduce((s, l) => s + l.cantidad, 0)
+                : prodActual.cantidad;
+            if (item.cantidad > disponible) {
+                faltantes.push(`${item.producto.nombre}: pediste ${item.cantidad} ${prodActual.unidad || ""}, quedan ${disponible}`);
+            }
+        }
+        if (faltantes.length > 0) {
+            alert(`⚠️ No se puede completar la venta, el stock cambió:\n\n${faltantes.join("\n")}\n\nAjusta las cantidades en el carrito e inténtalo de nuevo.`);
+            renderCarrito();
+            return;
+        }
+    }
+
+    // El número de factura se genera aquí, ya pasada la validación de
+    // stock — así una venta cancelada no "quema" un número de factura que
+    // luego quedaría sin usar (ej. #125 cancelada, #126 siendo en realidad
+    // la primera venta real del día).
     const numeroFactura = generarNumeroFacturaPOS();
-    const itemsFactura = [];
+
+    // ── Primera pasada: cuánto se puede vender realmente de cada línea ──
+    // (sin registrar nada todavía). Con "Vender sin stock" DESACTIVADO esto
+    // siempre coincide con lo pedido, porque ya se validó arriba. Con esa
+    // opción ACTIVADA, puede haber líneas que se sirvan parcialmente.
+    const lineas = posCarritoItems.map(item => {
+        const precioConDesc = aplicarDescuentoGlobalATotal(precioConDescuentoItem(item));
+        let disponible = item.cantidad;
+        if (item.producto.usaFifo) {
+            disponible = (item.producto.lotes || []).reduce((s, l) => s + l.cantidad, 0);
+        } else {
+            const prodActual = DB.buscarProducto(item.producto.id);
+            disponible = prodActual ? prodActual.cantidad : 0;
+        }
+        return { item, precioConDesc, cantidadVendida: Math.min(item.cantidad, disponible) };
+    });
+
+    // Total REAL de la venta, calculado sobre lo que efectivamente se va a
+    // vender — no sobre lo pedido originalmente. Con stock normal ambos
+    // coinciden siempre; solo pueden diferir con "Vender sin stock" activo.
+    const total = lineas.reduce((s, l) => s + l.precioConDesc * l.cantidadVendida, 0);
 
     // Montos de efectivo/transferencia a nivel de FACTURA (no por línea).
     // Antes se guardaba el monto completo de la factura en CADA producto
@@ -6424,10 +6486,10 @@ function ejecutarVentaPOS() {
     // reportes sumaran el efectivo/transferencia varias veces (una por
     // cada línea). Ahora se calcula una sola vez y solo se adjunta al
     // primer movimiento de la factura; el resto queda en 0.
-    // También: para pago en efectivo puro se guarda el TOTAL de la venta
-    // (lo que realmente entra neto a la caja), no el dinero que entregó
-    // el cliente — ese monto ya incluye el cambio que se le devuelve, así
-    // que guardarlo tal cual inflaba el efectivo registrado.
+    // También: para pago en efectivo puro se guarda el TOTAL REAL de la
+    // venta (lo que realmente entra neto a la caja), no el dinero que
+    // entregó el cliente (eso ya incluye el cambio) ni el total pedido
+    // originalmente si al final se vendió menos por falta de stock.
     const montoEfectivoFactura = posMetodoActual === "mixto"
         ? (Number(document.getElementById("posMixtoEfectivo").value) || 0)
         : (posMetodoActual === "efectivo" ? total : 0);
@@ -6436,29 +6498,20 @@ function ejecutarVentaPOS() {
         : 0;
 
     const avisosStockPOS = [];
+    const itemsFactura = [];
 
-    posCarritoItems.forEach((item, idx) => {
-        const precioConDesc = aplicarDescuentoGlobalATotal(precioConDescuentoItem(item));
+    lineas.forEach(({ item, precioConDesc, cantidadVendida }, idx) => {
         let costoReal = null;
-        let cantidadVendida = item.cantidad;
 
         if (item.producto.usaFifo) {
-            const resultado = DB.consumirLotesFIFO(item.producto.id, item.cantidad);
+            const resultado = DB.consumirLotesFIFO(item.producto.id, cantidadVendida);
             costoReal = resultado.costoUnitarioPromedio;
-            if (!resultado.completo) {
-                // Solo puede pasar con "Vender sin stock" activado: se registra
-                // únicamente lo que de verdad salió de los lotes, no lo pedido.
-                cantidadVendida = resultado.cantidadConsumida;
-                avisosStockPOS.push(`${item.producto.nombre}: solo había ${resultado.cantidadConsumida} de ${item.cantidad} ${item.producto.unidad||""}`);
-            }
         } else {
             const prod = DB.buscarProducto(item.producto.id);
-            const nuevaCant = Math.max(0, prod.cantidad - item.cantidad);
-            if (item.cantidad > prod.cantidad) {
-                cantidadVendida = prod.cantidad;
-                avisosStockPOS.push(`${item.producto.nombre}: solo había ${prod.cantidad} de ${item.cantidad} ${item.producto.unidad||""}`);
-            }
-            DB.actualizarProducto(item.producto.id, { cantidad: nuevaCant });
+            DB.actualizarProducto(item.producto.id, { cantidad: Math.max(0, prod.cantidad - cantidadVendida) });
+        }
+        if (cantidadVendida < item.cantidad) {
+            avisosStockPOS.push(`${item.producto.nombre}: solo había ${cantidadVendida} de ${item.cantidad} ${item.producto.unidad||""}`);
         }
 
         DB.registrarMovimiento("salida", item.producto.id, {
@@ -6484,7 +6537,8 @@ function ejecutarVentaPOS() {
     });
 
     if (avisosStockPOS.length > 0) {
-        alert(`⚠️ Algunos productos no tenían todo el stock pedido y se vendió solo lo disponible:\n\n${avisosStockPOS.join("\n")}`);
+        alert(`⚠️ Algunos productos no tenían todo el stock pedido y se vendió solo lo disponible:\n\n${avisosStockPOS.join("\n")}` +
+            (posMetodoActual === "mixto" ? `\n\n⚠️ El total de la venta bajó a ${total.toLocaleString("es-CU")} ${moneda}. Revisa el reparto de efectivo/transferencia que se cobró, porque se guardó tal como lo escribiste.` : ""));
     }
 
     if (posMetodoActual !== "fiado") {
