@@ -33,6 +33,18 @@ const DB = {
             { id: "alm1", nombre: "Almacén principal" },
             { id: "alm2", nombre: "Tienda" }
         ]);
+        // ── Usuarios / Roles / Tiendas / Cajas (Fase A) ──
+        // Estructuras nuevas, independientes de las anteriores. Si no existen
+        // (instalación anterior a esta versión), _migrarUsuariosRolesTiendas()
+        // las crea automáticamente sin tocar productos/movimientos/etc.
+        this.usuarios = this._cargarClave("usuarios", []);
+        this.roles = this._cargarClave("roles", []);
+        this.tiendas = this._cargarClave("tiendas", []);
+        this.cajas = this._cargarClave("cajas", []);
+        if (!Array.isArray(this.usuarios)) { this.usuarios = []; this._clavesCorruptas.push("usuarios"); }
+        if (!Array.isArray(this.roles)) { this.roles = []; this._clavesCorruptas.push("roles"); }
+        if (!Array.isArray(this.tiendas)) { this.tiendas = []; this._clavesCorruptas.push("tiendas"); }
+        if (!Array.isArray(this.cajas)) { this.cajas = []; this._clavesCorruptas.push("cajas"); }
         this.configuracion = this._cargarClave("configuracion", {
             nombreNegocio: "Mi Negocio", emoji: "🏪", propietario: "",
             telefono: "", direccion: "", municipio: "", provincia: "",
@@ -82,6 +94,11 @@ const DB = {
             activo: a.activo !== false
         }));
 
+        // Migración segura de usuarios/roles/tiendas/cajas: crea lo que falte
+        // sin tocar ni interpretar como daño la ausencia de estas estructuras
+        // nuevas (instalaciones existentes nunca las tuvieron).
+        this._migrarUsuariosRolesTiendas();
+
         if (this._clavesCorruptas.length > 0) {
             // No sobrescribimos silenciosamente: avisamos apenas la pantalla
             // esté lista, para que el negocio sepa que esa sección se
@@ -94,6 +111,124 @@ const DB = {
                 "Si tienes un respaldo reciente, restáuralo desde Configuración → Respaldo."
             ), 500);
         } else {
+            this.guardar();
+        }
+    },
+
+    // ── Migración Fase A: usuarios / roles / tiendas / cajas ──
+    // Se ejecuta en cada carga. Si las tablas ya existen y tienen datos, no
+    // hace nada. Solo crea lo que falte, y SOLO la primera vez (instalación
+    // sin estas estructuras todavía). No borra ni modifica productos,
+    // movimientos, almacenes, configuración, gastos, clientes, proveedores,
+    // caja ni sesionesCaja bajo ninguna circunstancia.
+    _ROLES_BASE: {
+        administrador: ["ver_dashboard","ver_inventario","crear_producto","editar_producto","eliminar_producto",
+            "registrar_entrada","ajustar_inventario","transferir_mercancia","recibir_transferencia",
+            "vender","vender_fiado","aplicar_descuento","anular_venta","devolucion",
+            "abrir_caja","cerrar_caja","retiro_caja","consultar_caja",
+            "ver_clientes","editar_clientes","ver_proveedores","editar_proveedores","registrar_gastos",
+            "ver_reportes","ver_estadisticas","gestionar_usuarios","gestionar_roles","gestionar_tiendas",
+            "gestionar_cajas","configuracion","onat","respaldos"],
+        encargado: ["ver_dashboard","ver_inventario","crear_producto","editar_producto",
+            "registrar_entrada","ajustar_inventario","transferir_mercancia","recibir_transferencia",
+            "vender","vender_fiado","aplicar_descuento","devolucion",
+            "abrir_caja","cerrar_caja","retiro_caja","consultar_caja",
+            "ver_clientes","editar_clientes","ver_proveedores","editar_proveedores","registrar_gastos",
+            "ver_reportes","ver_estadisticas"],
+        cajero: ["ver_dashboard","ver_inventario","vender","vender_fiado","abrir_caja","cerrar_caja",
+            "consultar_caja","ver_clientes","editar_clientes"],
+        almacenero: ["ver_dashboard","ver_inventario","registrar_entrada","ajustar_inventario",
+            "transferir_mercancia","recibir_transferencia"]
+    },
+    _migrarUsuariosRolesTiendas() {
+        // 1) Roles base — solo si no hay ninguno todavía.
+        if (this.roles.length === 0) {
+            const ahora = new Date().toISOString();
+            this.roles = [
+                { id: "rol_admin", nombre: "Administrador", clave: "administrador", permisos: [...this._ROLES_BASE.administrador], fechaCreacion: ahora },
+                { id: "rol_encargado", nombre: "Encargado", clave: "encargado", permisos: [...this._ROLES_BASE.encargado], fechaCreacion: ahora },
+                { id: "rol_cajero", nombre: "Cajero", clave: "cajero", permisos: [...this._ROLES_BASE.cajero], fechaCreacion: ahora },
+                { id: "rol_almacenero", nombre: "Almacenero", clave: "almacenero", permisos: [...this._ROLES_BASE.almacenero], fechaCreacion: ahora }
+            ];
+        }
+
+        // 2) Tienda principal — solo si no hay ninguna todavía. Se enlaza por
+        // almacenId a un almacén YA EXISTENTE (no se crea ninguno nuevo, no
+        // se toca DB.almacenes). Preferencia: un almacén que ya permita
+        // ventas y no sea el primero (para no chocar con el "principal" de
+        // abastecimiento); si no hay otro, usa el primero disponible.
+        if (this.tiendas.length === 0 && this.almacenes.length > 0) {
+            const candidato = this.almacenes.find(a => a.permiteVentas !== false && a.activo !== false && a.id !== this.almacenes[0].id)
+                || this.almacenes.find(a => a.permiteVentas !== false && a.activo !== false)
+                || this.almacenes[0];
+            this.tiendas = [{
+                id: "tienda_principal",
+                nombre: "Tienda Principal",
+                descripcion: "",
+                activa: true,
+                almacenId: candidato.id,
+                fechaCreacion: new Date().toISOString()
+            }];
+        }
+
+        // 3) Caja física — solo si no hay ninguna todavía.
+        if (this.cajas.length === 0 && this.tiendas.length > 0) {
+            this.cajas = [{
+                id: "caja_01",
+                nombre: "Caja 01",
+                tiendaId: this.tiendas[0].id,
+                activa: true,
+                fechaCreacion: new Date().toISOString()
+            }];
+        }
+
+        // 4) Usuario Administrador — solo si no hay ningún usuario todavía.
+        // IMPORTANTE: DB.configuracion.pin NO se borra ni se sobrescribe aquí.
+        // Se conserva como respaldo temporal de acceso hasta confirmar que el
+        // login nuevo funciona bien. El usuario Administrador se crea con un
+        // PIN propio (hasheado) derivado del PIN actual si existe, o "1234"
+        // por defecto si nunca se configuró uno — el negocio deberá
+        // cambiarlo desde Configuración → Usuarios en cuanto entre.
+        if (this.usuarios.length === 0) {
+            const pinBase = (this.configuracion && this.configuracion.pin) ? this.configuracion.pin : "1234";
+            const idAdmin = "user_admin";
+            this.usuarios.push({
+                id: idAdmin,
+                nombre: "Administrador",
+                usuario: "admin",
+                pinHash: null, // se completa de forma asíncrona abajo (hashPin usa Web Crypto)
+                pinPendienteHash: pinBase, // marcador temporal para que _completarHashAdminPendiente() lo resuelva
+                rolId: "rol_admin",
+                activo: true,
+                tiendaId: this.tiendas.length > 0 ? this.tiendas[0].id : null,
+                cajaId: this.cajas.length > 0 ? this.cajas[0].id : null,
+                fechaCreacion: new Date().toISOString(),
+                ultimoAcceso: null
+            });
+            // El hash es async (crypto.subtle); se resuelve apenas se pueda y
+            // se guarda. Mientras tanto pinPendienteHash sirve como respaldo
+            // legible solo por esta migración (nunca se usa para autenticar).
+            this._completarHashAdminPendiente();
+        }
+    },
+
+    // Calcula el hash SHA-256 (Web Crypto API, nativa del navegador, sin
+    // dependencias externas, funciona offline igual porque no requiere red)
+    // del PIN del admin recién migrado y lo guarda, borrando el texto plano.
+    async _completarHashAdminPendiente() {
+        const admin = this.usuarios.find(u => u.id === "user_admin" && u.pinPendienteHash);
+        if (!admin) return;
+        try {
+            const hash = await hashPin(admin.pinPendienteHash, admin.id);
+            admin.pinHash = hash;
+        } catch (e) {
+            // Si el navegador no soporta crypto.subtle (contexto no seguro,
+            // navegador muy antiguo), se deja pinHash en null; loginConPin()
+            // debe contemplar este caso y seguir aceptando DB.configuracion.pin
+            // como respaldo hasta que el entorno lo permita.
+            admin.pinHash = null;
+        } finally {
+            delete admin.pinPendienteHash;
             this.guardar();
         }
     },
@@ -124,6 +259,10 @@ const DB = {
         localStorage.setItem("proveedores", JSON.stringify(this.proveedores));
         localStorage.setItem("almacenes", JSON.stringify(this.almacenes));
         localStorage.setItem("configuracion", JSON.stringify(this.configuracion));
+        localStorage.setItem("usuarios", JSON.stringify(this.usuarios));
+        localStorage.setItem("roles", JSON.stringify(this.roles));
+        localStorage.setItem("tiendas", JSON.stringify(this.tiendas));
+        localStorage.setItem("cajas", JSON.stringify(this.cajas));
     },
 
     agregarProducto(producto) {
@@ -420,6 +559,164 @@ document.addEventListener("visibilitychange", () => {
 window.addEventListener("pagehide", () => {
     if (DB._guardarProgramado) DB._guardarInmediato();
 });
+
+// ═══════════════════════════════════════════════
+// FASE B — ROLES Y PERMISOS
+// ═══════════════════════════════════════════════
+// Todo esto es capa de datos/consulta. NO se conecta todavía a ninguna
+// pantalla ni a POS/FIFO/caja (eso es Fase C en adelante). El objetivo de
+// esta fase es que el permiso de una acción se decida SIEMPRE consultando
+// DB.roles (datos), nunca comparando "rol === 'cajero'" dentro de una
+// función de negocio. Así, cambiar qué puede hacer un rol en el futuro es
+// editar un array de permisos, no tocar 20 funciones distintas.
+
+// Catálogo maestro de permisos: única fuente de verdad de qué permisos
+// existen en la app y cómo se llaman/agrupan. Sirve para: (a) validar que
+// un rol no incluya un permiso inventado/mal escrito, y (b) alimentar más
+// adelante la pantalla Configuración → Usuarios y permisos sin tener que
+// hardcodear la lista otra vez.
+const CATALOGO_PERMISOS = {
+    "Inventario y ventas": [
+        ["ver_dashboard", "Ver panel principal"],
+        ["ver_inventario", "Ver inventario"],
+        ["crear_producto", "Crear productos"],
+        ["editar_producto", "Editar productos"],
+        ["eliminar_producto", "Eliminar productos"],
+        ["registrar_entrada", "Registrar entradas de mercancía"],
+        ["ajustar_inventario", "Ajustar inventario"],
+        ["transferir_mercancia", "Transferir mercancía entre almacenes"],
+        ["recibir_transferencia", "Recibir transferencias"]
+    ],
+    "Ventas / POS": [
+        ["vender", "Vender en el POS"],
+        ["vender_fiado", "Vender a fiado"],
+        ["aplicar_descuento", "Aplicar descuentos"],
+        ["anular_venta", "Anular ventas"],
+        ["devolucion", "Registrar devoluciones"]
+    ],
+    "Caja": [
+        ["abrir_caja", "Abrir caja"],
+        ["cerrar_caja", "Cerrar caja"],
+        ["retiro_caja", "Retirar dinero de caja"],
+        ["consultar_caja", "Consultar estado de caja"]
+    ],
+    "Clientes y proveedores": [
+        ["ver_clientes", "Ver clientes"],
+        ["editar_clientes", "Editar/crear clientes"],
+        ["ver_proveedores", "Ver proveedores"],
+        ["editar_proveedores", "Editar/crear proveedores"]
+    ],
+    "Gastos y reportes": [
+        ["registrar_gastos", "Registrar gastos"],
+        ["ver_reportes", "Ver reportes"],
+        ["ver_estadisticas", "Ver estadísticas"]
+    ],
+    "Administración": [
+        ["gestionar_usuarios", "Gestionar usuarios"],
+        ["gestionar_roles", "Gestionar roles"],
+        ["gestionar_tiendas", "Gestionar tiendas"],
+        ["gestionar_cajas", "Gestionar cajas"],
+        ["configuracion", "Acceder a configuración crítica"],
+        ["onat", "Gestionar ONAT"],
+        ["respaldos", "Exportar/restaurar respaldos"]
+    ]
+};
+
+// Lista plana de claves válidas, derivada del catálogo (no se escribe a mano
+// en dos sitios distintos, para que nunca queden desincronizados).
+function listaPermisosValidos() {
+    return Object.values(CATALOGO_PERMISOS).flat().map(p => p[0]);
+}
+
+// ¿Este ROL (por id) tiene este permiso? Consulta pura de datos.
+function rolTienePermiso(rolId, permiso) {
+    if (!rolId || !permiso) return false;
+    const rol = DB.roles.find(r => r.id === rolId);
+    if (!rol || !Array.isArray(rol.permisos)) return false;
+    return rol.permisos.includes(permiso);
+}
+
+// ¿Este USUARIO tiene este permiso? Pasa por: usuario activo → su rol →
+// permisos de ese rol. Esta es la función que Fase C/G deben usar en vez de
+// comparar nombres de rol directamente.
+function usuarioTienePermiso(usuario, permiso) {
+    if (!usuario || usuario.activo === false) return false;
+    return rolTienePermiso(usuario.rolId, permiso);
+}
+
+// ── CRUD de roles (datos, no UI todavía) ──
+// Reglas: no se puede borrar el rol Administrador (rol_admin) para evitar
+// dejar la app sin nadie que pueda gestionar usuarios. Los permisos se
+// validan contra el catálogo para evitar strings inventados por error.
+function agregarRol({ nombre, permisos = [] }) {
+    if (!nombre || !nombre.trim()) throw new Error("El rol necesita un nombre.");
+    const validos = listaPermisosValidos();
+    const permisosLimpios = [...new Set(permisos)].filter(p => validos.includes(p));
+    const rol = {
+        id: "rol_" + Date.now(),
+        nombre: nombre.trim(),
+        clave: null, // null = rol personalizado (no es uno de los 4 base)
+        permisos: permisosLimpios,
+        fechaCreacion: new Date().toISOString()
+    };
+    DB.roles.push(rol);
+    DB.guardar();
+    return rol;
+}
+
+function actualizarRol(id, { nombre, permisos } = {}) {
+    const rol = DB.roles.find(r => r.id === id);
+    if (!rol) throw new Error("Rol no encontrado.");
+    if (nombre !== undefined) {
+        if (!nombre.trim()) throw new Error("El nombre no puede quedar vacío.");
+        rol.nombre = nombre.trim();
+    }
+    if (permisos !== undefined) {
+        const validos = listaPermisosValidos();
+        rol.permisos = [...new Set(permisos)].filter(p => validos.includes(p));
+    }
+    DB.guardar();
+    return rol;
+}
+
+function eliminarRol(id) {
+    if (id === "rol_admin") throw new Error("No se puede eliminar el rol Administrador.");
+    const enUso = DB.usuarios.some(u => u.rolId === id);
+    if (enUso) throw new Error("Hay usuarios usando este rol. Reasígnalos antes de eliminarlo.");
+    DB.roles = DB.roles.filter(r => r.id !== id);
+    DB.guardar();
+}
+
+function listarRoles() {
+    return DB.roles.slice();
+}
+
+// ── Hash de PIN (Fase A) ──
+// Usa la Web Crypto API nativa del navegador (crypto.subtle), disponible sin
+// dependencias externas en cualquier contexto seguro (https / PWA instalada,
+// como GitHub Pages), y sigue funcionando offline porque no requiere red,
+// solo el propio navegador. Nunca se guarda el PIN nuevo en texto plano.
+// "salt" = id del usuario, para que dos usuarios con el mismo PIN no
+// produzcan el mismo hash almacenado.
+async function hashPin(pin, salt) {
+    if (!window.crypto || !window.crypto.subtle) {
+        throw new Error("crypto.subtle no disponible en este entorno");
+    }
+    const datos = new TextEncoder().encode(String(salt || "") + ":" + String(pin || ""));
+    const buffer = await window.crypto.subtle.digest("SHA-256", datos);
+    return Array.from(new Uint8Array(buffer)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+// Compara un PIN ingresado contra el hash guardado de un usuario.
+async function verificarPin(usuario, pinIngresado) {
+    if (!usuario || !usuario.pinHash) return false;
+    try {
+        const hash = await hashPin(pinIngresado, usuario.id);
+        return hash === usuario.pinHash;
+    } catch (e) {
+        return false;
+    }
+}
 
 // ═══════════════════════════════════════════════
 // ESTADO
@@ -1301,6 +1598,7 @@ function abrirConfiguracion() {
     document.querySelectorAll(".nav-item")[4].classList.add("active");
     document.getElementById("btnFlotante").classList.add("ocultar-boton");
     actualizarTarjetaNegocio();
+    actualizarUISesion();
 }
 
 function abrirSubConfig(sub) {
@@ -1309,7 +1607,8 @@ function abrirSubConfig(sub) {
         negocio: "subNegocio", inventario: "subInventario", ventas: "subVentas",
         onat: "subOnat", notificaciones: "subNotificaciones", seguridad: "subSeguridad",
         respaldo: "subRespaldo", exportar: "subExportar", apariencia: "subApariencia",
-        idioma: "subIdioma", pro: "subPro", acerca: "subAcerca"
+        idioma: "subIdioma", pro: "subPro", acerca: "subAcerca", usuarios: "subUsuarios",
+        tiendas: "subTiendas", cajas: "subCajas"
     };
     const pantallaId = mapa[sub];
     if (!pantallaId) return;
@@ -2778,7 +3077,29 @@ function renderSheetLista() {
     const texto = document.getElementById("sheetBuscador").value.toLowerCase().trim();
     const lista = document.getElementById("sheetLista");
     let productos = [...DB.productos].sort((a, b) => a.nombre.localeCompare(b.nombre));
-    if (sheetFiltroActivo) productos = productos.filter(p => p.almacen === sheetFiltroActivo);
+
+    if (sheetModo === "pos") {
+        // Fase G: en modo POS, el almacén SIEMPRE se resuelve del contexto,
+        // nunca del chip (sheetFiltroActivo se ignora aquí salvo en modo
+        // compatibilidad). Se revalida en cada render, no se confía en un
+        // valor guardado de cuando se abrió el sheet.
+        const acceso = resolverAccesoPOS();
+        if (acceso.modo === "bloqueado") {
+            lista.innerHTML = `<div class="sheet-vacio"><span>⛔</span>${acceso.motivo}</div>`;
+            document.getElementById("sheetContador").innerText = "0 productos";
+            return;
+        }
+        if (acceso.modo === "restringido") {
+            productos = productos.filter(p => p.almacen === acceso.almacenAutorizado.nombre);
+        } else if (sheetFiltroActivo) {
+            productos = productos.filter(p => p.almacen === sheetFiltroActivo); // modo compatibilidad
+        }
+    } else if (sheetFiltroActivo) {
+        // Modos "transferencia" y "movimiento": sin cambios, deben poder
+        // ver/elegir cualquier almacén.
+        productos = productos.filter(p => p.almacen === sheetFiltroActivo);
+    }
+
     if (texto) productos = productos.filter(p =>
         p.nombre.toLowerCase().includes(texto) ||
         (p.categoria && p.categoria.toLowerCase().includes(texto)) ||
@@ -3180,6 +3501,15 @@ function cargarSubConfig(sub) {
         document.getElementById("subOcultarCompra").checked = cfg.ocultarCompra === true;
         if (cfg.pinActivo) document.getElementById("subPinCampos").classList.remove("oculto");
     }
+    else if (sub === "usuarios") {
+        renderListaUsuarios();
+    }
+    else if (sub === "tiendas") {
+        renderListaTiendas();
+    }
+    else if (sub === "cajas") {
+        renderListaCajas();
+    }
     else if (sub === "respaldo") {
         document.getElementById("subUltimoRespaldo").innerText = cfg.ultimoRespaldo
             ? new Date(cfg.ultimoRespaldo).toLocaleString("es-CU") : "Nunca";
@@ -3399,12 +3729,13 @@ function verificarStockAlIniciar() {
 // ═══════════════════════════════════════════════
 function exportarRespaldo() {
     const respaldo = {
-        version: "1.1.0", fecha: new Date().toISOString(),
+        version: "1.2.0", fecha: new Date().toISOString(),
         negocio: DB.configuracion.nombreNegocio || "Mi Negocio",
         productos: DB.productos, movimientos: DB.movimientos,
         almacenes: DB.almacenes, configuracion: DB.configuracion,
         gastos: DB.gastos, clientes: DB.clientes, proveedores: DB.proveedores,
-        caja: DB.caja, sesionesCaja: DB.sesionesCaja
+        caja: DB.caja, sesionesCaja: DB.sesionesCaja,
+        usuarios: DB.usuarios, roles: DB.roles, tiendas: DB.tiendas, cajas: DB.cajas
     };
     DB.configuracion.ultimoRespaldo = respaldo.fecha;
     DB.guardar();
@@ -3433,7 +3764,7 @@ function importarRespaldo(e) {
                 alert("⚠️ Archivo de respaldo inválido: falta la lista de productos o movimientos.");
                 return;
             }
-            const camposLista = ["gastos", "clientes", "proveedores", "sesionesCaja"];
+            const camposLista = ["gastos", "clientes", "proveedores", "sesionesCaja", "usuarios", "roles", "tiendas", "cajas"];
             for (const campo of camposLista) {
                 if (datos[campo] !== undefined && !Array.isArray(datos[campo])) {
                     alert(`⚠️ Archivo de respaldo inválido: "${campo}" no tiene el formato esperado.`);
@@ -3444,12 +3775,21 @@ function importarRespaldo(e) {
             DB.movimientos = datos.movimientos;
             DB.almacenes = Array.isArray(datos.almacenes) ? datos.almacenes : DB.almacenes;
             DB.configuracion = { ...DB.configuracion, ...(datos.configuracion || {}) };
-            // Compatibilidad con respaldos antiguos (v1.0.0) que no incluían estos campos
+            // Compatibilidad con respaldos antiguos (v1.0.0/v1.1.0) que no incluían estos campos
             DB.gastos = datos.gastos || [];
             DB.clientes = datos.clientes || [];
             DB.proveedores = datos.proveedores || [];
             DB.sesionesCaja = datos.sesionesCaja || [];
             DB.caja = (datos.caja && typeof datos.caja === "object") ? datos.caja : { sesionActiva: null };
+            // Usuarios/roles/tiendas/cajas: si el respaldo es anterior a esta
+            // versión y no las trae, NO se interpreta como daño — se dejan
+            // vacías y _migrarUsuariosRolesTiendas() las reconstruye igual
+            // que en una instalación nueva, sin exigir reconfigurar nada más.
+            DB.usuarios = datos.usuarios || [];
+            DB.roles = datos.roles || [];
+            DB.tiendas = datos.tiendas || [];
+            DB.cajas = datos.cajas || [];
+            DB._migrarUsuariosRolesTiendas();
             DB.guardar();
             aplicarConfiguracion();
             alert(`✅ Datos restaurados.\n${DB.productos.length} productos\n${DB.movimientos.length} movimientos\n${DB.clientes.length} clientes\n${DB.proveedores.length} proveedores\n${DB.gastos.length} gastos${datos.version === "1.0.0" ? "\n\nNota: este respaldo es de una versión anterior sin clientes/proveedores/gastos/caja, así que esas secciones quedaron vacías." : ""}`);
@@ -3480,6 +3820,546 @@ function confirmarBorrarDatos() {
 }
 
 // ═══════════════════════════════════════════════
+// FASE C — USUARIOS + LOGIN
+// ═══════════════════════════════════════════════
+// Alcance de esta fase, a propósito limitado:
+//   Usuario + PIN → usuario válido → usuarioActual → rol → permisos
+// NO integra todavía tiendas, cajas ni POS (eso es Fase F/G). El PIN global
+// (DB.configuracion.pin) se mantiene intacto como respaldo: la puerta de
+// entrada de la app sigue siendo exactamente la misma (mismo interruptor
+// pinActivo, mismo modal de 4 dígitos) para no arriesgar dejar a nadie
+// fuera. Lo único que cambia es qué pasa DESPUÉS de que el PIN es correcto.
+//
+// usuarioActual vive SOLO en memoria (variable de módulo). Nunca se guarda
+// en localStorage, así que al recargar la app siempre se vuelve a pedir
+// autenticación (si pinActivo está encendido) y nunca queda una sesión de
+// un usuario anterior disponible por accidente.
+let usuarioActual = null;
+
+// Intenta autenticar un PIN de 4 dígitos contra los usuarios activos.
+// Devuelve el usuario autenticado, o null si no coincide con nadie.
+// Estrategia (en este orden):
+//   1) Comparar contra el PIN de cada usuario ACTIVO vía verificarPin()
+//      (hash SHA-256). El primero que coincide, entra.
+//   2) Respaldo temporal: si el PIN coincide con DB.configuracion.pin (el
+//      PIN global de siempre) y el usuario Administrador está activo,
+//      entra como Administrador. Esto es intencional: así, aunque el hash
+//      falle por cualquier motivo (navegador sin crypto.subtle, migración
+//      incompleta, etc.), el PIN de toda la vida sigue funcionando y nadie
+//      queda bloqueado fuera de su propia app.
+async function iniciarSesion(pinIngresado) {
+    const activos = DB.usuarios.filter(u => u.activo !== false);
+    for (const u of activos) {
+        if (u.pinHash && await verificarPin(u, pinIngresado)) {
+            return _completarLogin(u);
+        }
+    }
+    // Respaldo con el PIN global existente
+    if (DB.configuracion.pin && pinIngresado === DB.configuracion.pin) {
+        const admin = DB.usuarios.find(u => u.id === "user_admin" && u.activo !== false);
+        if (admin) return _completarLogin(admin);
+    }
+    return null;
+}
+
+function _completarLogin(usuario) {
+    usuarioActual = usuario;
+    usuario.ultimoAcceso = new Date().toISOString();
+    DB.guardar();
+    actualizarUISesion();
+    return usuario;
+}
+
+// Cierra la sesión: limpia usuarioActual por completo (nunca deja permisos
+// de un usuario anterior disponibles) y, si el PIN de acceso está activo,
+// vuelve a pedirlo antes de continuar usando la app.
+function cerrarSesion() {
+    usuarioActual = null;
+    actualizarUISesion();
+    if (DB.configuracion.pinActivo && DB.configuracion.pin) {
+        mostrarModalPin();
+    }
+}
+
+// Refleja el usuario/rol actual en Configuración → Sesión. Si no hay sesión
+// (pinActivo apagado, o instalación recién migrada donde no se ha entrado
+// todavía), muestra el estado neutro sin romper nada.
+function actualizarUISesion() {
+    const elUsuario = document.getElementById("cfgSesionUsuario");
+    const elRol = document.getElementById("cfgSesionRol");
+    if (!elUsuario || !elRol) return; // la pantalla de Configuración puede no estar montada todavía
+    if (usuarioActual) {
+        const rol = DB.roles.find(r => r.id === usuarioActual.rolId);
+        elUsuario.textContent = usuarioActual.nombre;
+        elRol.textContent = rol ? rol.nombre : "(sin rol)";
+    } else {
+        elUsuario.textContent = "Sin sesión activa";
+        elRol.textContent = "—";
+    }
+}
+
+// ═══════════════════════════════════════════════
+// FASE G — AUTORIZACIÓN POS (capa alrededor del POS existente)
+// ═══════════════════════════════════════════════
+// No se reescribe el POS. Esta capa decide UNA cosa: qué almacén está
+// autorizado a ver/vender el usuario actual, o si no puede operar en
+// absoluto. FIFO, precios, pagos, factura, ventasSinStock, movimientos y
+// caja no se tocan en su lógica interna.
+//
+// ⚠️ REGLA DE TRANSICIÓN — TEMPORAL, NO ES LA ARQUITECTURA DEFINITIVA ⚠️
+// Mientras el login no sea obligatorio (DB.configuracion.pinActivo puede
+// estar apagado), distinguimos dos casos MUY distintos:
+//
+//   usuarioActual === null   → "MODO COMPATIBILIDAD": nadie iniciό sesión
+//                               todavía (login no está en uso). El POS se
+//                               comporta EXACTAMENTE igual que antes de la
+//                               Fase G: sin restricción de almacén. Esto es
+//                               deliberado y temporal, para no romper
+//                               instalaciones que aún no usan login.
+//
+//   usuarioActual !== null   → SIEMPRE pasa por contextoPuedeOperar('vender').
+//                               Si el contexto es inválido (usuario
+//                               desactivado, tienda inactiva, caja de otra
+//                               tienda, almacén inexistente, etc.), el POS
+//                               se BLOQUEA. Nunca, bajo ninguna
+//                               circunstancia, cae al modo compatibilidad
+//                               como respaldo — eso sería una forma
+//                               accidental de saltarse los permisos.
+//
+// Cuando el sistema esté completo y se decida hacer el login obligatorio,
+// el modo compatibilidad debe eliminarse (dejará de tener sentido que
+// usuarioActual pueda ser null durante una venta).
+function resolverAccesoPOS() {
+    if (usuarioActual === null) {
+        return { modo: "legacy", almacenAutorizado: null, motivo: null };
+    }
+    const resultado = contextoPuedeOperar("vender");
+    if (!resultado.permitido) {
+        return { modo: "bloqueado", almacenAutorizado: null, motivo: resultado.motivo };
+    }
+    return { modo: "restringido", almacenAutorizado: resultado.contexto.almacen, motivo: null };
+}
+
+// ═══════════════════════════════════════════════
+// FASE F — CONTEXTO USUARIO → ROL → PERMISOS → TIENDA → CAJA → ALMACÉN
+// ═══════════════════════════════════════════════
+// Esta es la única función que debe usarse (Fase G en adelante) para saber
+// "¿quién es, con qué rol, en qué tienda, en qué caja, vendiendo desde qué
+// almacén?". Nunca debe leerse usuarioActual.tiendaId directamente y darlo
+// por válido: aquí se revalida CADA eslabón contra los datos reales de DB
+// en el momento en que se llama (nada queda cacheado ni se confía en un
+// estado guardado), así que si algo cambia a mitad de sesión (el admin
+// desactiva la tienda, borra el rol, etc.) el contexto se invalida solo la
+// próxima vez que se consulte. No se guarda en localStorage — vive en
+// memoria mientras dura la sesión. No se conecta todavía a POS/FIFO/ventas.
+//
+// Devuelve siempre el mismo tipo de objeto:
+//   { valido: true,  motivo: null,     usuario, rol, permisos, tienda, caja, almacen }
+//   { valido: false, motivo: "texto",  usuario: null, rol: null, ... resto null }
+function obtenerContextoUsuario(usuario = usuarioActual) {
+    const invalido = (motivo) => ({
+        valido: false, motivo,
+        usuario: null, rol: null, permisos: [], tienda: null, caja: null, almacen: null
+    });
+
+    if (!usuario) return invalido("No hay sesión activa.");
+
+    // 1) El usuario debe existir de verdad en DB (no solo el objeto que
+    // haya quedado en memoria) y estar activo.
+    const u = DB.usuarios.find(x => x.id === usuario.id);
+    if (!u) return invalido("El usuario de la sesión ya no existe.");
+    if (u.activo === false) return invalido("El usuario está inactivo.");
+
+    // 2) El rol debe existir.
+    const rol = DB.roles.find(r => r.id === u.rolId);
+    if (!rol) return invalido("El rol asignado a este usuario ya no existe.");
+    if (!Array.isArray(rol.permisos)) return invalido("El rol asignado no tiene permisos válidos.");
+
+    // 3) La tienda debe existir y estar activa.
+    const tienda = DB.tiendas.find(t => t.id === u.tiendaId);
+    if (!tienda) return invalido("El usuario no tiene una tienda válida asignada.");
+    if (tienda.activa === false) return invalido(`La tienda "${tienda.nombre}" está inactiva.`);
+
+    // 4) La caja debe existir, estar activa, y pertenecer a esa tienda.
+    const caja = DB.cajas.find(c => c.id === u.cajaId);
+    if (!caja) return invalido("El usuario no tiene una caja válida asignada.");
+    if (caja.activa === false) return invalido(`La caja "${caja.nombre}" está inactiva.`);
+    if (caja.tiendaId !== tienda.id) return invalido(`La caja "${caja.nombre}" no pertenece a la tienda "${tienda.nombre}".`);
+
+    // 5) La tienda debe apuntar a un almacén real y activo.
+    const almacen = DB.almacenes.find(a => a.id === tienda.almacenId);
+    if (!almacen) return invalido(`La tienda "${tienda.nombre}" no tiene un almacén válido asignado.`);
+    if (almacen.activo === false) return invalido(`El almacén "${almacen.nombre}" está inactivo.`);
+
+    return {
+        valido: true, motivo: null,
+        usuario: u, rol, permisos: rol.permisos.slice(),
+        tienda, caja, almacen
+    };
+}
+
+// Atajo para el patrón más común de Fase G: "¿este contexto puede hacer X?".
+// Exige contexto válido de punta a punta Y el permiso puntual.
+function contextoPuedeOperar(permiso, usuario = usuarioActual) {
+    const ctx = obtenerContextoUsuario(usuario);
+    if (!ctx.valido) return { permitido: false, motivo: ctx.motivo, contexto: ctx };
+    if (!ctx.permisos.includes(permiso)) {
+        return { permitido: false, motivo: `El rol "${ctx.rol.nombre}" no tiene el permiso "${permiso}".`, contexto: ctx };
+    }
+    return { permitido: true, motivo: null, contexto: ctx };
+}
+
+// ═══════════════════════════════════════════════
+// FASE E — TIENDAS Y CAJAS (interfaz)
+// ═══════════════════════════════════════════════
+// Regla fija de esta fase: la cadena Caja → Tienda → Almacén debe quedar
+// siempre válida. Nunca se guarda una tienda con un almacenId que no exista
+// en DB.almacenes, ni una caja con un tiendaId que no exista en DB.tiendas.
+// No se toca POS/FIFO/caja/ventas ni se migra p.almacen. No se conecta
+// todavía ninguna restricción real al POS (eso es Fase F/G).
+
+function renderListaTiendas() {
+    const cont = document.getElementById("tiendasLista");
+    if (!cont) return;
+    if (DB.tiendas.length === 0) {
+        cont.innerHTML = `<div class="cfg-info-box2"><span>ℹ️</span><p>No hay tiendas todavía.</p></div>`;
+        return;
+    }
+    cont.innerHTML = DB.tiendas.map((t, i) => {
+        const almacen = DB.almacenes.find(a => a.id === t.almacenId);
+        const cajasDeEsta = DB.cajas.filter(c => c.tiendaId === t.id).length;
+        return `
+        <div class="cfg-row" onclick="abrirModalTienda('${t.id}')">
+          <div class="cfg-row-icon" style="background:rgba(99,179,237,0.12)">${t.activa === false ? "🚫" : "🏬"}</div>
+          <div class="cfg-row-body">
+            <span class="cfg-row-titulo">${escapeHtml(t.nombre)}</span>
+            <span class="cfg-row-sub">${almacen ? "→ " + escapeHtml(almacen.nombre) : "⚠️ Sin almacén válido"} · ${cajasDeEsta} caja(s) ${t.activa === false ? "· Inactiva" : ""}</span>
+          </div>
+          <span class="cfg-row-arrow">›</span>
+        </div>${i < DB.tiendas.length - 1 ? '<div class="cfg-row-sep"></div>' : ''}`;
+    }).join("");
+}
+
+function abrirModalTienda(id = null) {
+    const selAlmacen = document.getElementById("tiendaAlmacen");
+    selAlmacen.innerHTML = DB.almacenes.map(a => `<option value="${a.id}">${escapeHtml(a.nombre)}</option>`).join("");
+    if (DB.almacenes.length === 0) {
+        alert("⚠️ Primero necesitas al menos un almacén creado en Almacenes.");
+        return;
+    }
+
+    if (id) {
+        const t = DB.tiendas.find(x => x.id === id);
+        if (!t) return;
+        document.getElementById("modalTiendaTitulo").innerText = "✏️ Editar Tienda";
+        document.getElementById("tiendaEditandoId").value = t.id;
+        document.getElementById("tiendaNombre").value = t.nombre || "";
+        document.getElementById("tiendaDescripcion").value = t.descripcion || "";
+        selAlmacen.value = t.almacenId || "";
+        document.getElementById("tiendaActivaToggle").checked = t.activa !== false;
+    } else {
+        document.getElementById("modalTiendaTitulo").innerText = "🏬 Nueva Tienda";
+        document.getElementById("tiendaEditandoId").value = "";
+        document.getElementById("tiendaNombre").value = "";
+        document.getElementById("tiendaDescripcion").value = "";
+        selAlmacen.value = DB.almacenes[0].id;
+        document.getElementById("tiendaActivaToggle").checked = true;
+    }
+    document.getElementById("modalTienda").classList.remove("oculto");
+}
+
+function cerrarModalTienda() {
+    document.getElementById("modalTienda").classList.add("oculto");
+}
+
+function guardarTienda() {
+    const id = document.getElementById("tiendaEditandoId").value || null;
+    const nombre = document.getElementById("tiendaNombre").value.trim();
+    const descripcion = document.getElementById("tiendaDescripcion").value.trim();
+    const almacenId = document.getElementById("tiendaAlmacen").value;
+    const activa = document.getElementById("tiendaActivaToggle").checked;
+
+    if (!nombre) { alert("⚠️ El nombre de la tienda es obligatorio."); return; }
+
+    // Regla fija: el almacén debe existir de verdad. Nunca referencias huérfanas.
+    const almacen = DB.almacenes.find(a => a.id === almacenId);
+    if (!almacen) { alert("⚠️ Selecciona un almacén válido."); return; }
+
+    if (id) {
+        const t = DB.tiendas.find(x => x.id === id);
+        t.nombre = nombre; t.descripcion = descripcion; t.almacenId = almacenId; t.activa = activa;
+    } else {
+        DB.tiendas.push({
+            id: "tienda_" + Date.now(), nombre, descripcion, almacenId, activa,
+            fechaCreacion: new Date().toISOString()
+        });
+    }
+    DB.guardar();
+    cerrarModalTienda();
+    renderListaTiendas();
+}
+
+function renderListaCajas() {
+    const cont = document.getElementById("cajasLista");
+    if (!cont) return;
+    if (DB.cajas.length === 0) {
+        cont.innerHTML = `<div class="cfg-info-box2"><span>ℹ️</span><p>No hay cajas todavía.</p></div>`;
+        return;
+    }
+    cont.innerHTML = DB.cajas.map((c, i) => {
+        const tienda = DB.tiendas.find(t => t.id === c.tiendaId);
+        return `
+        <div class="cfg-row" onclick="abrirModalCaja('${c.id}')">
+          <div class="cfg-row-icon" style="background:rgba(245,197,66,0.12)">${c.activa === false ? "🚫" : "🧾"}</div>
+          <div class="cfg-row-body">
+            <span class="cfg-row-titulo">${escapeHtml(c.nombre)}</span>
+            <span class="cfg-row-sub">${tienda ? "→ " + escapeHtml(tienda.nombre) : "⚠️ Sin tienda válida"} ${c.activa === false ? "· Inactiva" : ""}</span>
+          </div>
+          <span class="cfg-row-arrow">›</span>
+        </div>${i < DB.cajas.length - 1 ? '<div class="cfg-row-sep"></div>' : ''}`;
+    }).join("");
+}
+
+function abrirModalCaja(id = null) {
+    const selTienda = document.getElementById("cajaTienda");
+    selTienda.innerHTML = DB.tiendas.map(t => `<option value="${t.id}">${escapeHtml(t.nombre)}</option>`).join("");
+    if (DB.tiendas.length === 0) {
+        alert("⚠️ Primero necesitas al menos una tienda creada.");
+        return;
+    }
+
+    if (id) {
+        const c = DB.cajas.find(x => x.id === id);
+        if (!c) return;
+        document.getElementById("modalCajaTitulo").innerText = "✏️ Editar Caja";
+        document.getElementById("cajaEditandoId").value = c.id;
+        document.getElementById("cajaNombre").value = c.nombre || "";
+        selTienda.value = c.tiendaId || "";
+        document.getElementById("cajaActivaToggle").checked = c.activa !== false;
+    } else {
+        document.getElementById("modalCajaTitulo").innerText = "🧾 Nueva Caja";
+        document.getElementById("cajaEditandoId").value = "";
+        document.getElementById("cajaNombre").value = "";
+        selTienda.value = DB.tiendas[0].id;
+        document.getElementById("cajaActivaToggle").checked = true;
+    }
+    document.getElementById("modalCaja").classList.remove("oculto");
+}
+
+function cerrarModalCaja() {
+    document.getElementById("modalCaja").classList.add("oculto");
+}
+
+function guardarCaja() {
+    const id = document.getElementById("cajaEditandoId").value || null;
+    const nombre = document.getElementById("cajaNombre").value.trim();
+    const tiendaId = document.getElementById("cajaTienda").value;
+    const activa = document.getElementById("cajaActivaToggle").checked;
+
+    if (!nombre) { alert("⚠️ El nombre de la caja es obligatorio."); return; }
+
+    // Regla fija: la tienda debe existir de verdad. Nunca referencias huérfanas.
+    const tienda = DB.tiendas.find(t => t.id === tiendaId);
+    if (!tienda) { alert("⚠️ Selecciona una tienda válida."); return; }
+
+    if (id) {
+        const c = DB.cajas.find(x => x.id === id);
+        c.nombre = nombre; c.tiendaId = tiendaId; c.activa = activa;
+    } else {
+        DB.cajas.push({
+            id: "caja_" + Date.now(), nombre, tiendaId, activa,
+            fechaCreacion: new Date().toISOString()
+        });
+    }
+    DB.guardar();
+    cerrarModalCaja();
+    renderListaCajas();
+}
+
+// ═══════════════════════════════════════════════
+// FASE D — GESTIÓN DE USUARIOS (interfaz)
+// ═══════════════════════════════════════════════
+// Alcance: listar/crear/editar/activar-desactivar usuarios y asignarles rol.
+// Los selects de Tienda/Caja aquí solo REFERENCIAN las entidades que ya creó
+// la Fase A (tienda_principal/caja_01) — esta fase NO crea ni administra
+// tiendas ni cajas todavía (eso es Fase E). No se toca POS/FIFO/caja.
+
+function renderListaUsuarios() {
+    const cont = document.getElementById("usuariosLista");
+    if (!cont) return;
+    if (DB.usuarios.length === 0) {
+        cont.innerHTML = `<div class="cfg-info-box2"><span>ℹ️</span><p>No hay usuarios todavía.</p></div>`;
+        return;
+    }
+    cont.innerHTML = DB.usuarios.map((u, i) => {
+        const rol = DB.roles.find(r => r.id === u.rolId);
+        const esUltimoAdmin = u.rolId === "rol_admin" &&
+            DB.usuarios.filter(x => x.rolId === "rol_admin" && x.activo !== false).length === 1 &&
+            u.activo !== false;
+        return `
+        <div class="cfg-row" onclick="abrirModalUsuario('${u.id}')">
+          <div class="cfg-row-icon" style="background:rgba(0,232,150,0.12)">${u.activo === false ? "🚫" : "👤"}</div>
+          <div class="cfg-row-body">
+            <span class="cfg-row-titulo">${escapeHtml(u.nombre)}</span>
+            <span class="cfg-row-sub">${rol ? escapeHtml(rol.nombre) : "(sin rol)"} ${u.activo === false ? "· Inactivo" : ""}</span>
+          </div>
+          <label class="cfg-toggle" onclick="event.stopPropagation()">
+            <input type="checkbox" ${u.activo !== false ? "checked" : ""}
+              ${esUltimoAdmin ? "disabled title=\"No puedes desactivar al único administrador activo\"" : ""}
+              onchange="toggleActivoUsuario('${u.id}', this.checked)">
+            <span class="cfg-toggle-slider"></span>
+          </label>
+        </div>${i < DB.usuarios.length - 1 ? '<div class="cfg-row-sep"></div>' : ''}`;
+    }).join("");
+}
+
+// Pequeña utilidad para no inyectar HTML sin escapar desde nombres de usuario
+function escapeHtml(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+    }[c]));
+}
+
+function abrirModalUsuario(id = null) {
+    // Poblar selects de rol/tienda desde los datos reales (nunca hardcodeado)
+    const selRol = document.getElementById("usuarioRol");
+    selRol.innerHTML = DB.roles.map(r => `<option value="${r.id}">${escapeHtml(r.nombre)}</option>`).join("");
+
+    const selTienda = document.getElementById("usuarioTienda");
+    selTienda.innerHTML = `<option value="">— Sin tienda asignada —</option>` +
+        DB.tiendas.map(t => `<option value="${t.id}">${escapeHtml(t.nombre)}</option>`).join("");
+
+    document.getElementById("usuarioPin").value = "";
+    document.getElementById("usuarioPinConfirmar").value = "";
+
+    if (id) {
+        const u = DB.usuarios.find(x => x.id === id);
+        if (!u) return;
+        document.getElementById("modalUsuarioTitulo").innerText = "✏️ Editar Usuario";
+        document.getElementById("usuarioEditandoId").value = u.id;
+        document.getElementById("usuarioNombre").value = u.nombre || "";
+        selRol.value = u.rolId || "";
+        selTienda.value = u.tiendaId || "";
+        document.getElementById("usuarioActivoToggle").checked = u.activo !== false;
+        document.getElementById("usuarioPinAyuda").classList.remove("oculto");
+    } else {
+        document.getElementById("modalUsuarioTitulo").innerText = "👤 Nuevo Usuario";
+        document.getElementById("usuarioEditandoId").value = "";
+        document.getElementById("usuarioNombre").value = "";
+        selRol.value = DB.roles.find(r => r.clave === "cajero")?.id || (DB.roles[0]?.id || "");
+        selTienda.value = DB.tiendas[0]?.id || "";
+        document.getElementById("usuarioActivoToggle").checked = true;
+        document.getElementById("usuarioPinAyuda").classList.add("oculto"); // en creación, el PIN es obligatorio (no hay "actual" que conservar)
+    }
+    actualizarCajasUsuario();
+    if (id) {
+        const u = DB.usuarios.find(x => x.id === id);
+        document.getElementById("usuarioCaja").value = u.cajaId || "";
+    }
+    document.getElementById("modalUsuario").classList.remove("oculto");
+}
+
+function actualizarCajasUsuario() {
+    const tiendaId = document.getElementById("usuarioTienda").value;
+    const selCaja = document.getElementById("usuarioCaja");
+    const cajas = DB.cajas.filter(c => c.tiendaId === tiendaId);
+    selCaja.innerHTML = `<option value="">— Sin caja asignada —</option>` +
+        cajas.map(c => `<option value="${c.id}">${escapeHtml(c.nombre)}</option>`).join("");
+}
+
+function cerrarModalUsuario() {
+    document.getElementById("modalUsuario").classList.add("oculto");
+}
+
+// Verifica que un PIN de 4 dígitos no esté ya en uso por otro usuario activo.
+// Reutiliza verificarPin() (compara contra el hash real de cada usuario),
+// así nunca hace falta guardar el PIN de nadie en texto plano para
+// comprobar unicidad.
+async function pinYaUsadoPorOtro(pin, idExcluir) {
+    const activos = DB.usuarios.filter(u => u.activo !== false && u.id !== idExcluir && u.pinHash);
+    for (const u of activos) {
+        if (await verificarPin(u, pin)) return true;
+    }
+    return false;
+}
+
+async function guardarUsuario() {
+    const id = document.getElementById("usuarioEditandoId").value || null;
+    const nombre = document.getElementById("usuarioNombre").value.trim();
+    const rolId = document.getElementById("usuarioRol").value;
+    const tiendaId = document.getElementById("usuarioTienda").value || null;
+    const cajaId = document.getElementById("usuarioCaja").value || null;
+    const activo = document.getElementById("usuarioActivoToggle").checked;
+    const pin = document.getElementById("usuarioPin").value;
+    const pinConfirmar = document.getElementById("usuarioPinConfirmar").value;
+
+    if (!nombre) { alert("⚠️ El nombre es obligatorio."); return; }
+    if (!rolId) { alert("⚠️ Selecciona un rol."); return; }
+
+    // PIN obligatorio al crear; opcional al editar (vacío = no cambiar)
+    if (!id && !pin) { alert("⚠️ El PIN es obligatorio para un usuario nuevo."); return; }
+    if (pin || pinConfirmar) {
+        if (!/^\d{4}$/.test(pin)) { alert("⚠️ El PIN debe tener exactamente 4 dígitos."); return; }
+        if (pin !== pinConfirmar) { alert("⚠️ Los dos PIN no coinciden."); return; }
+        if (await pinYaUsadoPorOtro(pin, id)) {
+            alert("⚠️ Ese PIN ya lo está usando otro usuario activo. Elige uno diferente.");
+            return;
+        }
+    }
+
+    // No permitir dejar la app sin ningún administrador activo
+    const rolElegido = DB.roles.find(r => r.id === rolId);
+    if (id) {
+        const usuarioActual2 = DB.usuarios.find(u => u.id === id);
+        const eraAdminActivo = usuarioActual2 && usuarioActual2.rolId === "rol_admin" && usuarioActual2.activo !== false;
+        const seguiraSiendoAdminActivo = rolElegido?.id === "rol_admin" && activo;
+        const otrosAdminsActivos = DB.usuarios.filter(u => u.id !== id && u.rolId === "rol_admin" && u.activo !== false).length;
+        if (eraAdminActivo && !seguiraSiendoAdminActivo && otrosAdminsActivos === 0) {
+            alert("⚠️ No puedes quitar el rol/desactivar al único administrador activo. Crea otro administrador primero.");
+            return;
+        }
+    }
+
+    if (id) {
+        const u = DB.usuarios.find(x => x.id === id);
+        u.nombre = nombre;
+        u.rolId = rolId;
+        u.tiendaId = tiendaId;
+        u.cajaId = cajaId;
+        u.activo = activo;
+        if (pin) u.pinHash = await hashPin(pin, u.id);
+    } else {
+        const nuevoId = "user_" + Date.now();
+        const nuevo = {
+            id: nuevoId, nombre, usuario: "", pinHash: await hashPin(pin, nuevoId),
+            rolId, activo, tiendaId, cajaId,
+            fechaCreacion: new Date().toISOString(), ultimoAcceso: null
+        };
+        DB.usuarios.push(nuevo);
+    }
+    DB.guardar();
+    cerrarModalUsuario();
+    renderListaUsuarios();
+    if (usuarioActual) actualizarUISesion(); // por si el usuario editado es el de la sesión actual
+}
+
+function toggleActivoUsuario(id, nuevoValor) {
+    const u = DB.usuarios.find(x => x.id === id);
+    if (!u) return;
+    if (!nuevoValor) {
+        const otrosAdminsActivos = DB.usuarios.filter(x => x.id !== id && x.rolId === "rol_admin" && x.activo !== false).length;
+        if (u.rolId === "rol_admin" && otrosAdminsActivos === 0) {
+            alert("⚠️ No puedes desactivar al único administrador activo.");
+            renderListaUsuarios(); // revierte el toggle visualmente
+            return;
+        }
+    }
+    u.activo = nuevoValor;
+    DB.guardar();
+    renderListaUsuarios();
+}
+
+// ═══════════════════════════════════════════════
 // PIN DE ACCESO
 // ═══════════════════════════════════════════════
 function mostrarModalPin() {
@@ -3494,8 +4374,9 @@ function pinTecla(digito) {
     pinIngresado += digito;
     actualizarDisplayPin();
     if (pinIngresado.length === 4) {
-        setTimeout(() => {
-            if (pinIngresado === DB.configuracion.pin) {
+        setTimeout(async () => {
+            const usuario = await iniciarSesion(pinIngresado);
+            if (usuario) {
                 document.getElementById("modalPin").classList.add("oculto");
                 actualizarInicio();
                 verificarStockAlIniciar();
@@ -3735,6 +4616,11 @@ function confirmarEliminarAlmacen() {
     const enUso = DB.productos.filter(p => p.almacen === a.nombre).length;
     if (enUso > 0) {
         alert(`⚠️ No puedes eliminar "${a.nombre}" porque tiene ${enUso} producto(s) asignados. Mueve o elimina esos productos primero.`);
+        return;
+    }
+    const tiendaQueLoUsa = DB.tiendas.find(t => t.almacenId === a.id);
+    if (tiendaQueLoUsa) {
+        alert(`⚠️ No puedes eliminar "${a.nombre}" porque la tienda "${tiendaQueLoUsa.nombre}" lo tiene asignado como su almacén de venta. Cambia esa asignación primero en Configuración → Tiendas.`);
         return;
     }
     if (!confirm(`¿Eliminar el almacén "${a.nombre}"? Esta acción no se puede deshacer.`)) return;
@@ -5837,11 +6723,30 @@ let posUltimaVenta = null;
 
 function abrirSheetProductosPOS() {
     sheetModo = "pos";
+
+    // ── Fase G: resolver acceso ANTES de mostrar nada ──
+    const acceso = resolverAccesoPOS();
+    if (acceso.modo === "bloqueado") {
+        alert(`⛔ No puedes acceder al POS:\n\n${acceso.motivo}`);
+        return;
+    }
+
     const filtrosEl = document.getElementById("sheetFiltros");
-    const ubicaciones = [...new Set(DB.productos.map(p => p.almacen).filter(Boolean))];
-    filtrosEl.innerHTML = `<button class="chip-filtro activo" data-filtro="" onclick="seleccionarFiltroSheet(this)">Todos</button>`;
-    ubicaciones.forEach(ub => { filtrosEl.innerHTML += `<button class="chip-filtro" data-filtro="${ub}" onclick="seleccionarFiltroSheet(this)">📍 ${ub}</button>`; });
-    sheetFiltroActivo = "";
+    if (acceso.modo === "restringido") {
+        // Un solo chip, informativo, SIN onclick: no se puede seleccionar
+        // otro almacén manualmente. El almacén viene exclusivamente del
+        // contexto (obtenerContextoUsuario), nunca de la interfaz.
+        filtrosEl.innerHTML = `<button class="chip-filtro activo" data-filtro="${acceso.almacenAutorizado.nombre}">📍 ${acceso.almacenAutorizado.nombre}</button>`;
+        sheetFiltroActivo = acceso.almacenAutorizado.nombre;
+    } else {
+        // Modo compatibilidad temporal (usuarioActual === null): mismo
+        // comportamiento que tenía el POS antes de la Fase G.
+        const ubicaciones = [...new Set(DB.productos.map(p => p.almacen).filter(Boolean))];
+        filtrosEl.innerHTML = `<button class="chip-filtro activo" data-filtro="" onclick="seleccionarFiltroSheet(this)">Todos</button>`;
+        ubicaciones.forEach(ub => { filtrosEl.innerHTML += `<button class="chip-filtro" data-filtro="${ub}" onclick="seleccionarFiltroSheet(this)">📍 ${ub}</button>`; });
+        sheetFiltroActivo = "";
+    }
+
     document.getElementById("sheetBuscador").value = "";
     renderSugerenciasPOS();
     renderSheetLista();
@@ -5853,19 +6758,26 @@ function abrirSheetProductosPOS() {
 // Se calculan a partir de DB.movimientos existentes, sin crear ni un campo
 // ni un almacenamiento paralelo.
 function calcularMasVendidosPOS(limite) {
+    const acceso = resolverAccesoPOS();
+    if (acceso.modo === "bloqueado") return [];
     const conteo = {};
     DB.movimientos.forEach(m => {
         if (m.tipo !== "salida") return;
         conteo[m.productoId] = (conteo[m.productoId] || 0) + (m.cantidad || 0);
     });
-    return Object.entries(conteo)
+    let resultado = Object.entries(conteo)
         .sort((a, b) => b[1] - a[1])
-        .slice(0, limite)
         .map(([id]) => DB.buscarProducto(id))
         .filter(Boolean);
+    if (acceso.modo === "restringido") {
+        resultado = resultado.filter(p => p.almacen === acceso.almacenAutorizado.nombre);
+    }
+    return resultado.slice(0, limite);
 }
 
 function calcularRecientesPOS(limite) {
+    const acceso = resolverAccesoPOS();
+    if (acceso.modo === "bloqueado") return [];
     const vistos = new Set();
     const resultado = [];
     [...DB.movimientos]
@@ -5874,7 +6786,9 @@ function calcularRecientesPOS(limite) {
         .forEach(m => {
             if (vistos.has(m.productoId) || resultado.length >= limite) return;
             const p = DB.buscarProducto(m.productoId);
-            if (p) { vistos.add(m.productoId); resultado.push(p); }
+            if (!p) return;
+            if (acceso.modo === "restringido" && p.almacen !== acceso.almacenAutorizado.nombre) return;
+            vistos.add(m.productoId); resultado.push(p);
         });
     return resultado;
 }
@@ -5909,12 +6823,31 @@ function abrirEscanerPOS() {
 function procesarCodigoEscaneadoPOS(codigo) {
     const p = DB.buscarPorCodigo(codigo);
     if (!p) { mostrarToastPOS({ texto: `⚠️ Código no encontrado: ${codigo}` }); return; }
+    const acceso = resolverAccesoPOS();
+    if (acceso.modo === "bloqueado") { mostrarToastPOS({ texto: `⛔ ${acceso.motivo}` }); return; }
+    if (acceso.modo === "restringido" && p.almacen !== acceso.almacenAutorizado.nombre) {
+        // No revelamos que el código existe en otro almacén: mismo mensaje
+        // que "no encontrado" para no filtrar información de otras tiendas.
+        mostrarToastPOS({ texto: `⚠️ Código no encontrado: ${codigo}` });
+        return;
+    }
     seleccionarProductoPOS(p.id, { desdeEscaner: true });
 }
 
 function seleccionarProductoPOS(id, opciones = {}) {
     const p = DB.buscarProducto(id);
     if (!p) return;
+
+    // Fase G: defensa en profundidad. La interfaz ya no debería ofrecer
+    // productos de otro almacén, pero esto protege contra una llamada
+    // directa (consola, chip obsoleto en memoria, etc.).
+    const acceso = resolverAccesoPOS();
+    if (acceso.modo === "bloqueado") { mostrarToastPOS({ texto: `⛔ ${acceso.motivo}` }); return; }
+    if (acceso.modo === "restringido" && p.almacen !== acceso.almacenAutorizado.nombre) {
+        mostrarToastPOS({ texto: "⚠️ Ese producto no pertenece a tu almacén autorizado" });
+        return;
+    }
+
     if (p.cantidad <= 0 && !DB.configuracion.ventasSinStock) {
         mostrarToastPOS({ texto: "⚠️ Sin stock disponible" });
         return;
@@ -6419,6 +7352,23 @@ function generarNumeroFacturaPOS() {
 }
 
 function ejecutarVentaPOS() {
+    // ── Fase G: autorización final, ANTES de tocar stock/FIFO/factura/caja ──
+    // Esta es la comprobación que de verdad importa: aunque alguien lograra
+    // saltarse la interfaz y llamar a esta función directamente, la venta
+    // no se registra si el contexto no lo permite en este mismo instante.
+    const accesoVenta = resolverAccesoPOS();
+    if (accesoVenta.modo === "bloqueado") {
+        alert(`⛔ No se puede completar la venta:\n\n${accesoVenta.motivo}`);
+        return;
+    }
+    if (accesoVenta.modo === "restringido") {
+        const fueraDeAlmacen = posCarritoItems.find(item => item.producto.almacen !== accesoVenta.almacenAutorizado.nombre);
+        if (fueraDeAlmacen) {
+            alert(`⛔ El carrito contiene "${fueraDeAlmacen.producto.nombre}", que no pertenece a tu almacén autorizado (${accesoVenta.almacenAutorizado.nombre}). Elimínalo del carrito e inténtalo de nuevo.`);
+            return;
+        }
+    }
+
     const totalSolicitado = getTotalPOS();
     const moneda = DB.configuracion.moneda || "CUP";
     const clienteId = posMetodoActual === "fiado" ? document.getElementById("posClienteId").value : null;

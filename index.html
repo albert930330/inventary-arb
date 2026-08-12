@@ -1630,6 +1630,51 @@
       <span class="cfg-row-arrow">›</span>
     </div>
 
+    <!-- SESIÓN (Fase C) -->
+    <div class="cfg-grupo-label">👤 SESIÓN</div>
+    <div class="cfg-grupo">
+      <div class="cfg-row">
+        <div class="cfg-row-icon" style="background:rgba(0,232,150,0.12)">👤</div>
+        <div class="cfg-row-body">
+          <span class="cfg-row-titulo" id="cfgSesionUsuario">Sin sesión activa</span>
+          <span class="cfg-row-sub" id="cfgSesionRol">—</span>
+        </div>
+      </div>
+      <div class="cfg-row-sep"></div>
+      <button class="cfg-btn-accion" onclick="cerrarSesion()">🔒 Cerrar sesión</button>
+    </div>
+
+    <!-- GRUPO: USUARIOS Y PERMISOS (Fase D) -->
+    <div class="cfg-grupo-label">👥 USUARIOS Y PERMISOS</div>
+    <div class="cfg-grupo">
+      <div class="cfg-row" onclick="abrirSubConfig('usuarios')">
+        <div class="cfg-row-icon" style="background:rgba(0,232,150,0.12)">👥</div>
+        <div class="cfg-row-body">
+          <span class="cfg-row-titulo">Usuarios</span>
+          <span class="cfg-row-sub">Crear, editar, activar y asignar roles</span>
+        </div>
+        <span class="cfg-row-arrow">›</span>
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-row" onclick="abrirSubConfig('tiendas')">
+        <div class="cfg-row-icon" style="background:rgba(99,179,237,0.12)">🏬</div>
+        <div class="cfg-row-body">
+          <span class="cfg-row-titulo">Tiendas</span>
+          <span class="cfg-row-sub">Cada tienda vende desde un almacén</span>
+        </div>
+        <span class="cfg-row-arrow">›</span>
+      </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-row" onclick="abrirSubConfig('cajas')">
+        <div class="cfg-row-icon" style="background:rgba(245,197,66,0.12)">🧾</div>
+        <div class="cfg-row-body">
+          <span class="cfg-row-titulo">Cajas</span>
+          <span class="cfg-row-sub">Cajas físicas de cada tienda</span>
+        </div>
+        <span class="cfg-row-arrow">›</span>
+      </div>
+    </div>
+
     <!-- GRUPO: NEGOCIO -->
     <div class="cfg-grupo-label">🏢 NEGOCIO</div>
     <div class="cfg-grupo">
@@ -2249,6 +2294,151 @@
     </div>
     <div style="height:30px"></div>
   </div>
+</div>
+
+<!-- SUB: USUARIOS (Fase D) -->
+<div id="subUsuarios" class="pantalla">
+  <div class="header">
+    <button class="btn-back" onclick="volverConfig()">‹</button>
+    <div class="header-left"><h1>Usuarios</h1><p>Roles y accesos</p></div>
+  </div>
+  <div class="sub-contenido">
+    <div class="cfg-grupo-label">USUARIOS</div>
+    <div class="cfg-grupo" id="usuariosLista">
+      <!-- Se llena dinámicamente con renderListaUsuarios() -->
+    </div>
+
+    <button class="cfg-btn-accion cfg-btn-gold2" style="margin-top:14px" onclick="abrirModalUsuario()">＋ Nuevo usuario</button>
+    <div style="height:30px"></div>
+  </div>
+</div>
+
+<!-- MODAL: USUARIO (crear/editar) -->
+<div id="modalUsuario" class="modal oculto">
+<div class="modal-contenido">
+  <div class="modal-header">
+    <h2 id="modalUsuarioTitulo">👤 Nuevo Usuario</h2>
+    <button class="btn-cerrar" onclick="cerrarModalUsuario()">✕</button>
+  </div>
+  <input type="hidden" id="usuarioEditandoId">
+
+  <label>Nombre *</label>
+  <input type="text" id="usuarioNombre" placeholder="Ej: María Pérez">
+
+  <label>Rol *</label>
+  <select id="usuarioRol"></select>
+
+  <div class="fila-doble">
+    <div>
+      <label>Tienda</label>
+      <select id="usuarioTienda" onchange="actualizarCajasUsuario()"></select>
+    </div>
+    <div>
+      <label>Caja</label>
+      <select id="usuarioCaja"></select>
+    </div>
+  </div>
+
+  <label>PIN (4 dígitos)</label>
+  <input type="password" id="usuarioPin" placeholder="Dejar en blanco para no cambiar" maxlength="4" inputmode="numeric" pattern="[0-9]*">
+  <label>Confirmar PIN</label>
+  <input type="password" id="usuarioPinConfirmar" placeholder="Repite el PIN" maxlength="4" inputmode="numeric" pattern="[0-9]*">
+  <p id="usuarioPinAyuda" style="font-size:12px;color:var(--texto-sec,#888);margin:4px 0 0">Déjalo en blanco al editar si no quieres cambiar el PIN actual.</p>
+
+  <div class="cfg-toggle-row2" style="padding:14px 0 4px;">
+    <div class="cfg-row-body">
+      <span class="cfg-row-titulo">Usuario activo</span>
+      <span class="cfg-row-sub">Un usuario inactivo no puede iniciar sesión</span>
+    </div>
+    <label class="cfg-toggle"><input type="checkbox" id="usuarioActivoToggle" checked><span class="cfg-toggle-slider"></span></label>
+  </div>
+
+  <button id="guardarUsuarioBtn" onclick="guardarUsuario()">💾 Guardar Usuario</button>
+</div>
+</div>
+
+<!-- SUB: TIENDAS (Fase E) -->
+<div id="subTiendas" class="pantalla">
+  <div class="header">
+    <button class="btn-back" onclick="volverConfig()">‹</button>
+    <div class="header-left"><h1>Tiendas</h1><p>Cada tienda vende desde un almacén</p></div>
+  </div>
+  <div class="sub-contenido">
+    <div class="cfg-grupo-label">TIENDAS</div>
+    <div class="cfg-grupo" id="tiendasLista"></div>
+    <button class="cfg-btn-accion cfg-btn-gold2" style="margin-top:14px" onclick="abrirModalTienda()">＋ Nueva tienda</button>
+    <div style="height:30px"></div>
+  </div>
+</div>
+
+<!-- MODAL: TIENDA (crear/editar) -->
+<div id="modalTienda" class="modal oculto">
+<div class="modal-contenido">
+  <div class="modal-header">
+    <h2 id="modalTiendaTitulo">🏬 Nueva Tienda</h2>
+    <button class="btn-cerrar" onclick="cerrarModalTienda()">✕</button>
+  </div>
+  <input type="hidden" id="tiendaEditandoId">
+
+  <label>Nombre *</label>
+  <input type="text" id="tiendaNombre" placeholder="Ej: Tienda Principal">
+  <label>Descripción</label>
+  <input type="text" id="tiendaDescripcion" placeholder="Opcional">
+
+  <label>Almacén de venta *</label>
+  <select id="tiendaAlmacen"></select>
+  <p style="font-size:12px;color:var(--texto-sec,#888);margin:4px 0 0">El almacén debe existir en Almacenes. Ahí es de donde saldrá el inventario que se vende en esta tienda.</p>
+
+  <div class="cfg-toggle-row2" style="padding:14px 0 4px;">
+    <div class="cfg-row-body">
+      <span class="cfg-row-titulo">Tienda activa</span>
+    </div>
+    <label class="cfg-toggle"><input type="checkbox" id="tiendaActivaToggle" checked><span class="cfg-toggle-slider"></span></label>
+  </div>
+
+  <button onclick="guardarTienda()">💾 Guardar Tienda</button>
+</div>
+</div>
+
+<!-- SUB: CAJAS (Fase E) -->
+<div id="subCajas" class="pantalla">
+  <div class="header">
+    <button class="btn-back" onclick="volverConfig()">‹</button>
+    <div class="header-left"><h1>Cajas</h1><p>Cajas físicas de cada tienda</p></div>
+  </div>
+  <div class="sub-contenido">
+    <div class="cfg-grupo-label">CAJAS</div>
+    <div class="cfg-grupo" id="cajasLista"></div>
+    <button class="cfg-btn-accion cfg-btn-gold2" style="margin-top:14px" onclick="abrirModalCaja()">＋ Nueva caja</button>
+    <div style="height:30px"></div>
+  </div>
+</div>
+
+<!-- MODAL: CAJA (crear/editar) -->
+<div id="modalCaja" class="modal oculto">
+<div class="modal-contenido">
+  <div class="modal-header">
+    <h2 id="modalCajaTitulo">🧾 Nueva Caja</h2>
+    <button class="btn-cerrar" onclick="cerrarModalCaja()">✕</button>
+  </div>
+  <input type="hidden" id="cajaEditandoId">
+
+  <label>Nombre *</label>
+  <input type="text" id="cajaNombre" placeholder="Ej: Caja 01">
+
+  <label>Tienda *</label>
+  <select id="cajaTienda"></select>
+  <p style="font-size:12px;color:var(--texto-sec,#888);margin:4px 0 0">La tienda debe existir. Esta caja quedará ligada a ella.</p>
+
+  <div class="cfg-toggle-row2" style="padding:14px 0 4px;">
+    <div class="cfg-row-body">
+      <span class="cfg-row-titulo">Caja activa</span>
+    </div>
+    <label class="cfg-toggle"><input type="checkbox" id="cajaActivaToggle" checked><span class="cfg-toggle-slider"></span></label>
+  </div>
+
+  <button onclick="guardarCaja()">💾 Guardar Caja</button>
+</div>
 </div>
 
 <!-- SUB: EXPORTAR Y REPORTES -->
