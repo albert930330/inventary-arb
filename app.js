@@ -376,7 +376,7 @@ const DB = {
     },
 
     // ── CAJA (sesiones) ──
-    abrirCaja(fondoInicial, responsable) {
+    abrirCaja(fondoInicial, responsable, contexto = {}) {
         const sesion = {
             id: "caja_" + Date.now(),
             fechaApertura: new Date().toISOString(),
@@ -385,7 +385,15 @@ const DB = {
             fondoInicial: Number(fondoInicial) || 0,
             estado: "abierta",
             movimientosCaja: [], // gastos y retiros de la sesión (Fase 2)
-            cierre: null         // fotografía congelada al cerrar (Fase 3)
+            cierre: null,        // fotografía congelada al cerrar (Fase 3)
+            // Fase I — opcionales, solo presentes si hay contexto de
+            // usuario válido al abrir. Sesiones anteriores a esta versión
+            // simplemente no tienen estos campos; nada las migra ni las
+            // toca. sesionCajaActiva()/resumenSesion()/cerrarCaja() no
+            // necesitan saber si existen o no.
+            usuarioId: contexto.usuarioId || null,
+            tiendaId: contexto.tiendaId || null,
+            cajaId: contexto.cajaId || null
         };
         this.sesionesCaja.push(sesion);
         this.caja.sesionActiva = sesion.id;
@@ -680,7 +688,14 @@ function actualizarRol(id, { nombre, permisos } = {}) {
 }
 
 function eliminarRol(id) {
-    if (id === "rol_admin") throw new Error("No se puede eliminar el rol Administrador.");
+    const rol = DB.roles.find(r => r.id === id);
+    if (!rol) throw new Error("Rol no encontrado.");
+    // Los 4 roles base (Administrador, Encargado, Cajero, Almacenero) son
+    // roles del sistema — se identifican porque tienen "clave" distinta de
+    // null — y nunca se pueden eliminar, tengan o no usuarios asignados.
+    // Solo los roles personalizados (clave === null) son eliminables, y
+    // solo si ningún usuario los tiene asignado.
+    if (rol.clave) throw new Error(`"${rol.nombre}" es un rol del sistema y no se puede eliminar.`);
     const enUso = DB.usuarios.some(u => u.rolId === id);
     if (enUso) throw new Error("Hay usuarios usando este rol. Reasígnalos antes de eliminarlo.");
     DB.roles = DB.roles.filter(r => r.id !== id);
@@ -1051,6 +1066,8 @@ function volverInicio() {
 }
 
 function abrirInventario() {
+    const acceso = resolverAccesoModulo("ver_inventario");
+    if (acceso.modo === "bloqueado") { alert(`⛔ No puedes acceder al inventario:\n\n${acceso.motivo}`); return; }
     mostrarPantalla("pantallaInventario");
     document.querySelectorAll(".nav-item")[1].classList.add("active");
     if (DB.configuracion.vistaLista && vistaActual === "tarjeta") {
@@ -1089,6 +1106,8 @@ function volverAlmacenes() {
 }
 
 function abrirGastos() {
+    const acceso = resolverAccesoModulo("registrar_gastos");
+    if (acceso.modo === "bloqueado") { alert(`⛔ No puedes acceder a gastos:\n\n${acceso.motivo}`); return; }
     mostrarPantalla("pantallaGastos");
     document.getElementById("btnFlotante").classList.add("ocultar-boton");
     mostrarGastos();
@@ -1096,12 +1115,16 @@ function abrirGastos() {
 }
 
 function abrirClientes() {
+    const acceso = resolverAccesoModulo("ver_clientes");
+    if (acceso.modo === "bloqueado") { alert(`⛔ No puedes ver clientes:\n\n${acceso.motivo}`); return; }
     mostrarPantalla("pantallaClientes");
     document.getElementById("btnFlotante").classList.add("ocultar-boton");
     mostrarClientes();
 }
 
 function abrirReportes() {
+    const acceso = resolverAccesoModulo("ver_reportes");
+    if (acceso.modo === "bloqueado") { alert(`⛔ No puedes ver reportes:\n\n${acceso.motivo}`); return; }
     mostrarPantalla("pantallaReportes");
     document.getElementById("btnFlotante").classList.add("ocultar-boton");
     vistaReporteActual = "dia";
@@ -1252,8 +1275,15 @@ function onTapEstadoCaja() {
 }
 
 function abrirModalAperturaCaja() {
+    const acceso = resolverAccesoCaja("abrir_caja");
+    if (acceso.modo === "bloqueado") { alert(`⛔ No puedes abrir caja:\n\n${acceso.motivo}`); return; }
+
     document.getElementById("aperturaFechaHora").innerText = new Date().toLocaleString("es-CU", { dateStyle: "long", timeStyle: "short" });
-    document.getElementById("aperturaResponsable").value = DB.configuracion.propietario || "";
+    // Con sesión de usuario, el responsable se deriva del usuario real, no
+    // del ajuste global del negocio. Se puede editar igual antes de abrir.
+    document.getElementById("aperturaResponsable").value = acceso.modo === "restringido"
+        ? acceso.contexto.usuario.nombre
+        : (DB.configuracion.propietario || "");
     document.getElementById("aperturaFondoInicial").value = "";
     document.getElementById("modalAperturaCaja").classList.remove("oculto");
 }
@@ -1263,10 +1293,20 @@ function cerrarModalAperturaCaja() {
 }
 
 function confirmarAperturaCaja() {
+    // Fase I: revalidar justo antes de escribir, no solo al abrir el modal.
+    const acceso = resolverAccesoCaja("abrir_caja");
+    if (acceso.modo === "bloqueado") { alert(`⛔ No se puede abrir caja:\n\n${acceso.motivo}`); cerrarModalAperturaCaja(); return; }
+
     const fondoInicial = document.getElementById("aperturaFondoInicial").value;
     if (fondoInicial === "" || Number(fondoInicial) < 0) { alert("⚠️ Ingresa el fondo inicial (puede ser 0)."); return; }
     const responsable = document.getElementById("aperturaResponsable").value.trim();
-    DB.abrirCaja(fondoInicial, responsable);
+
+    if (acceso.modo === "restringido") {
+        const ctx = acceso.contexto;
+        DB.abrirCaja(fondoInicial, responsable, { usuarioId: ctx.usuario.id, tiendaId: ctx.tienda.id, cajaId: ctx.caja.id });
+    } else {
+        DB.abrirCaja(fondoInicial, responsable); // modo compatibilidad, igual que antes
+    }
     cerrarModalAperturaCaja();
     renderEstadoCaja();
     mostrarToastPOS({ texto: "🟢 Caja abierta" });
@@ -1276,6 +1316,8 @@ function confirmarAperturaCaja() {
 function abrirSheetSesionCaja() {
     const sesion = DB.sesionCajaActiva();
     if (!sesion) { abrirModalAperturaCaja(); return; }
+    const acceso = resolverAccesoCaja("consultar_caja");
+    if (acceso.modo === "bloqueado") { alert(`⛔ No puedes consultar la caja:\n\n${acceso.motivo}`); return; }
     renderSheetSesionCaja();
     document.getElementById("sheetSesionCaja").classList.remove("oculto");
 }
@@ -1324,6 +1366,12 @@ let movCajaTipoActual = "gasto";
 
 function abrirModalMovimientoCaja(tipo) {
     if (!DB.sesionCajaActiva()) { alert("⚠️ No hay una caja abierta."); return; }
+    // Fase I: retiro_caja protege exclusivamente los retiros. Los gastos
+    // (tipo === "gasto") se dejan sin tocar hasta auditar el módulo Gastos.
+    if (tipo === "retiro") {
+        const acceso = resolverAccesoCaja("retiro_caja");
+        if (acceso.modo === "bloqueado") { alert(`⛔ No puedes hacer retiros de caja:\n\n${acceso.motivo}`); return; }
+    }
     cerrarSheetSesionCaja(); // el sheet tiene z-index mayor que el modal; hay que ocultarlo para que el modal quede al frente
     movCajaTipoActual = tipo;
     const esGasto = tipo === "gasto";
@@ -1342,6 +1390,11 @@ function cerrarModalMovimientoCaja() {
 
 function confirmarMovimientoCaja() {
     if (!DB.sesionCajaActiva()) { alert("⚠️ No hay una caja abierta."); cerrarModalMovimientoCaja(); return; }
+    // Fase I: revalidar justo antes de escribir, exclusivamente para retiros.
+    if (movCajaTipoActual === "retiro") {
+        const acceso = resolverAccesoCaja("retiro_caja");
+        if (acceso.modo === "bloqueado") { alert(`⛔ No se puede registrar el retiro:\n\n${acceso.motivo}`); cerrarModalMovimientoCaja(); return; }
+    }
     const concepto = document.getElementById("movCajaConcepto").value.trim();
     const monto = Number(document.getElementById("movCajaMonto").value);
     if (!concepto) { alert("⚠️ Escribe un " + (movCajaTipoActual === "gasto" ? "concepto." : "motivo.")); return; }
@@ -1356,6 +1409,8 @@ function confirmarMovimientoCaja() {
 function abrirModalCierreSesionCaja() {
     const sesion = DB.sesionCajaActiva();
     if (!sesion) return;
+    const acceso = resolverAccesoCaja("cerrar_caja");
+    if (acceso.modo === "bloqueado") { alert(`⛔ No puedes cerrar caja:\n\n${acceso.motivo}`); return; }
     cerrarSheetSesionCaja();
     const r = DB.resumenSesion(sesion);
     const moneda = DB.configuracion.moneda || "CUP";
@@ -1384,6 +1439,9 @@ function cerrarModalCierreSesionCaja() {
 function confirmarCierreSesionCaja() {
     const sesion = DB.sesionCajaActiva();
     if (!sesion) { cerrarModalCierreSesionCaja(); return; }
+    // Fase I: revalidar justo antes de escribir el cierre.
+    const acceso = resolverAccesoCaja("cerrar_caja");
+    if (acceso.modo === "bloqueado") { alert(`⛔ No se puede cerrar caja:\n\n${acceso.motivo}`); cerrarModalCierreSesionCaja(); return; }
     const contadoVal = document.getElementById("csEfectivoContado").value;
     if (contadoVal === "" || Number(contadoVal) < 0) { alert("⚠️ Ingresa el efectivo contado."); return; }
     const cerrada = DB.cerrarCaja(contadoVal);
@@ -1408,6 +1466,8 @@ function aceptarCierreSesionCaja() {
 
 // ── Historial de cajas (Fase 3) ──
 function abrirHistorialCaja() {
+    const acceso = resolverAccesoCaja("consultar_caja");
+    if (acceso.modo === "bloqueado") { alert(`⛔ No puedes consultar el historial de caja:\n\n${acceso.motivo}`); return; }
     mostrarPantalla("pantallaHistorialCaja");
     document.getElementById("btnFlotante").classList.add("ocultar-boton");
     renderHistorialCaja();
@@ -1522,6 +1582,8 @@ function setCierreHoy() {
 }
 
 function abrirProveedores() {
+    const acceso = resolverAccesoModulo("ver_proveedores");
+    if (acceso.modo === "bloqueado") { alert(`⛔ No puedes ver proveedores:\n\n${acceso.motivo}`); return; }
     mostrarPantalla("pantallaProveedores");
     document.getElementById("btnFlotante").classList.add("ocultar-boton");
     mostrarProveedores();
@@ -1539,6 +1601,8 @@ function abrirPerfilProveedor(id) {
 }
 
 function abrirONAT() {
+    const acceso = resolverAccesoModulo("onat");
+    if (acceso.modo === "bloqueado") { alert(`⛔ No puedes acceder a ONAT:\n\n${acceso.motivo}`); return; }
     mostrarPantalla("pantallaONAT");
     document.getElementById("btnFlotante").classList.add("ocultar-boton");
     onatTabActual = "panel";
@@ -1608,10 +1672,30 @@ function abrirSubConfig(sub) {
         onat: "subOnat", notificaciones: "subNotificaciones", seguridad: "subSeguridad",
         respaldo: "subRespaldo", exportar: "subExportar", apariencia: "subApariencia",
         idioma: "subIdioma", pro: "subPro", acerca: "subAcerca", usuarios: "subUsuarios",
-        tiendas: "subTiendas", cajas: "subCajas"
+        tiendas: "subTiendas", cajas: "subCajas", roles: "subRoles"
     };
     const pantallaId = mapa[sub];
     if (!pantallaId) return;
+
+    // Fase J4: cada sub-sección administrativa exige su propio permiso.
+    // OJO — decisión deliberada: "negocio" y "seguridad" (ajustes generales
+    // y PIN) quedan bajo "configuracion". Las demás secciones sensibles ya
+    // tienen su propio permiso específico. La pantalla PRINCIPAL de
+    // Configuración (abrirConfiguracion) NO se protege aquí — ahí vive el
+    // botón "Cerrar sesión", y bloquearla dejaría a cualquier rol sin
+    // "configuracion" (Cajero, Almacenero, Encargado, por defecto) sin
+    // forma de cerrar su sesión. Ver informe de Fase J4 para más detalle.
+    const permisoRequerido = {
+        usuarios: "gestionar_usuarios", roles: "gestionar_roles",
+        tiendas: "gestionar_tiendas", cajas: "gestionar_cajas",
+        respaldo: "respaldos", negocio: "configuracion", seguridad: "configuracion"
+    };
+    const permiso = permisoRequerido[sub];
+    if (permiso) {
+        const acceso = resolverAccesoModulo(permiso);
+        if (acceso.modo === "bloqueado") { alert(`⛔ No tienes acceso a esta sección:\n\n${acceso.motivo}`); return; }
+    }
+
     mostrarPantalla(pantallaId, "adelante");
     document.getElementById("btnFlotante").classList.add("ocultar-boton");
     cargarSubConfig(sub);
@@ -2090,6 +2174,8 @@ function actualizarTarjetaNegocio() {
 // MODAL PRODUCTO
 // ═══════════════════════════════════════════════
 function abrirModalProducto() {
+    const acceso = resolverAccesoModulo("crear_producto");
+    if (acceso.modo === "bloqueado") { alert(`⛔ No puedes crear productos:\n\n${acceso.motivo}`); return; }
     editandoId = null;
     limpiarFormulario();
     document.getElementById("modalTitulo").innerText = "📦 Nuevo Producto";
@@ -2284,6 +2370,11 @@ function mostrarAvisoDuplicado(producto, duplicados) {
 }
 
 document.getElementById("guardarProducto").addEventListener("click", async () => {
+    // Fase J1: segunda comprobación justo antes de tocar DB, distinguiendo
+    // crear (sin editandoId) de editar (con editandoId).
+    const accesoGuardar = resolverAccesoModulo(editandoId ? "editar_producto" : "crear_producto");
+    if (accesoGuardar.modo === "bloqueado") { alert(`⛔ No se puede guardar el producto:\n\n${accesoGuardar.motivo}`); return; }
+
     const nombre = document.getElementById("nombre").value.trim();
     const cantidad = document.getElementById("cantidad").value;
     const compra = document.getElementById("compra").value;
@@ -2732,6 +2823,8 @@ function toggleGrupos() {
 
 function editarProducto(id) {
     const p = DB.buscarProducto(id); if (!p) return;
+    const acceso = resolverAccesoModulo("editar_producto");
+    if (acceso.modo === "bloqueado") { alert(`⛔ No puedes editar productos:\n\n${acceso.motivo}`); return; }
     editandoId = id;
     document.getElementById("nombre").value = p.nombre || "";
     document.getElementById("categoria").value = p.categoria || "";
@@ -2815,7 +2908,13 @@ function duplicarProducto(id) {
 }
 
 function eliminarProducto(id) {
+    const accesoEntrada = resolverAccesoModulo("eliminar_producto");
+    if (accesoEntrada.modo === "bloqueado") { alert(`⛔ No puedes eliminar productos:\n\n${accesoEntrada.motivo}`); return; }
     if (confirm("¿Eliminar este producto?")) {
+        // Segunda comprobación, justo antes de tocar DB (por si el contexto
+        // cambió entre que se abrió el confirm() y se aceptó).
+        const accesoModificar = resolverAccesoModulo("eliminar_producto");
+        if (accesoModificar.modo === "bloqueado") { alert(`⛔ No se pudo eliminar:\n\n${accesoModificar.motivo}`); return; }
         const p = DB.buscarProducto(id);
         if (p && p.fotoId) FotoDB.eliminar(p.fotoId);
         DB.eliminarProducto(id); mostrarInventario(); actualizarInicio();
@@ -3010,6 +3109,10 @@ function verHistorialProducto(id) {
 }
 
 function irAMovimientoRapido(id, tipo) {
+    if (tipo === "entrada") {
+        const acceso = resolverAccesoModulo("registrar_entrada");
+        if (acceso.modo === "bloqueado") { alert(`⛔ No puedes registrar entradas:\n\n${acceso.motivo}`); return; }
+    }
     abrirMovimientos();
     setTimeout(() => { cambiarTab(tipo); seleccionarProductoMov(id); }, 150);
 }
@@ -3197,6 +3300,13 @@ function limpiarFormMov() {
 }
 
 document.getElementById("btnRegistrarMov").addEventListener("click", () => {
+    // Fase J1: registrar_entrada protege exclusivamente el registro de
+    // ENTRADAS. Las salidas manuales no están en el alcance de J1 y quedan
+    // sin cambios.
+    if (tipoMovActual === "entrada") {
+        const acceso = resolverAccesoModulo("registrar_entrada");
+        if (acceso.modo === "bloqueado") { alert(`⛔ No puedes registrar entradas:\n\n${acceso.motivo}`); return; }
+    }
     const productoId = document.getElementById("movProducto").value;
     const cantidad = Number(document.getElementById("movCantidad").value);
     const precio = Number(document.getElementById("movPrecio").value);
@@ -3346,6 +3456,8 @@ function mostrarHistorial() {
 // ═══════════════════════════════════════════════
 function abrirAjuste(id) {
     const p = DB.buscarProducto(id); if (!p) return;
+    const acceso = resolverAccesoModulo("ajustar_inventario");
+    if (acceso.modo === "bloqueado") { alert(`⛔ No puedes ajustar inventario:\n\n${acceso.motivo}`); return; }
     ajustandoId = id;
     document.getElementById("ajusteNombre").innerText = p.nombre;
     document.getElementById("ajusteStockActual").innerText = `${p.cantidad} ${p.unidad||""}`;
@@ -3365,6 +3477,9 @@ function cerrarAjuste() {
 
 document.getElementById("btnConfirmarAjuste").addEventListener("click", () => {
     if (!ajustandoId) return;
+    // Fase J1: segunda comprobación justo antes de tocar DB.
+    const acceso = resolverAccesoModulo("ajustar_inventario");
+    if (acceso.modo === "bloqueado") { alert(`⛔ No se puede confirmar el ajuste:\n\n${acceso.motivo}`); return; }
     const p = DB.buscarProducto(ajustandoId); if (!p) return;
     const tipo = document.getElementById("ajusteTipo").value;
     const cantidad = Number(document.getElementById("ajusteCantidad").value);
@@ -3509,6 +3624,9 @@ function cargarSubConfig(sub) {
     }
     else if (sub === "cajas") {
         renderListaCajas();
+    }
+    else if (sub === "roles") {
+        renderListaRoles();
     }
     else if (sub === "respaldo") {
         document.getElementById("subUltimoRespaldo").innerText = cfg.ultimoRespaldo
@@ -3728,6 +3846,8 @@ function verificarStockAlIniciar() {
 // RESPALDO Y RESTAURACIÓN
 // ═══════════════════════════════════════════════
 function exportarRespaldo() {
+    const acceso = resolverAccesoModulo("respaldos");
+    if (acceso.modo === "bloqueado") { alert(`⛔ No puedes exportar respaldos:\n\n${acceso.motivo}`); return; }
     const respaldo = {
         version: "1.2.0", fecha: new Date().toISOString(),
         negocio: DB.configuracion.nombreNegocio || "Mi Negocio",
@@ -3753,6 +3873,9 @@ function exportarRespaldo() {
 
 function importarRespaldo(e) {
     const archivo = e.target.files[0]; if (!archivo) return;
+    // Fase J4: primera comprobación, antes de leer el archivo siquiera.
+    const accesoEntrada = resolverAccesoModulo("respaldos");
+    if (accesoEntrada.modo === "bloqueado") { alert(`⛔ No puedes importar respaldos:\n\n${accesoEntrada.motivo}`); e.target.value = ""; return; }
     if (!confirm("⚠️ Esto reemplazará TODOS los datos actuales. ¿Continuar?")) { e.target.value = ""; return; }
     const reader = new FileReader();
     reader.onload = (ev) => {
@@ -3770,6 +3893,16 @@ function importarRespaldo(e) {
                     alert(`⚠️ Archivo de respaldo inválido: "${campo}" no tiene el formato esperado.`);
                     return;
                 }
+            }
+            // Fase J4: SEGUNDA comprobación, inmediatamente antes de reemplazar
+            // la base de datos completa. Esta es la operación administrativa
+            // más delicada de toda la app — se revalida aquí mismo, justo
+            // antes de la primera asignación, por si el contexto cambió
+            // entre que se eligió el archivo y que terminó de leerse.
+            const accesoModificar = resolverAccesoModulo("respaldos");
+            if (accesoModificar.modo === "bloqueado") {
+                alert(`⛔ No se pudo restaurar el respaldo:\n\n${accesoModificar.motivo}`);
+                return;
             }
             DB.productos = datos.productos;
             DB.movimientos = datos.movimientos;
@@ -3899,6 +4032,58 @@ function actualizarUISesion() {
 }
 
 // ═══════════════════════════════════════════════
+// FASE J — CONEXIÓN REAL DE PERMISOS (por bloques, J1 = Inventario)
+// ═══════════════════════════════════════════════
+// resolverAccesoModulo(permiso) es funcionalmente idéntica a
+// resolverAccesoCaja(permiso) — mismo patrón de 3 modos (legacy/
+// restringido/bloqueado) — pero se define aparte, sin tocar ni reutilizar
+// directamente resolverAccesoPOS()/resolverAccesoCaja(), para no arriesgar
+// ninguna regresión en Fase G/Fase I ya aprobadas. Todas comparten la misma
+// fuente de verdad real: contextoPuedeOperar() (Fase F/B).
+//
+// Regla de transición, igual que en G e I:
+//   usuarioActual === null  → modo compatibilidad (comportamiento actual)
+//   usuarioActual !== null  → SIEMPRE contextoPuedeOperar(permiso); si el
+//                              contexto es inválido, BLOQUEA — nunca cae a
+//                              compatibilidad.
+function resolverAccesoModulo(permiso) {
+    if (usuarioActual === null) {
+        return { modo: "legacy", contexto: null, motivo: null };
+    }
+    const resultado = contextoPuedeOperar(permiso);
+    if (!resultado.permitido) {
+        return { modo: "bloqueado", contexto: null, motivo: resultado.motivo };
+    }
+    return { modo: "restringido", contexto: resultado.contexto, motivo: null };
+}
+
+// ═══════════════════════════════════════════════
+// FASE I — PROTECCIÓN DE CAJA
+// ═══════════════════════════════════════════════
+// Mismo patrón que resolverAccesoPOS() (Fase G), pero parametrizado por
+// permiso, porque caja tiene varias acciones distintas (abrir/cerrar/
+// retirar/consultar) en vez de una sola. Regla de transición temporal
+// idéntica a la de Fase G: usuarioActual === null → modo compatibilidad
+// (comportamiento actual sin cambios). usuarioActual !== null → SIEMPRE
+// pasa por contextoPuedeOperar(permiso); si el contexto es inválido, se
+// bloquea — nunca cae al modo compatibilidad.
+//
+// IMPORTANTE (a propósito, no es un olvido): "retiro_caja" protege
+// exclusivamente los retiros, NO los gastos. Son conceptos contables
+// distintos y el módulo Gastos todavía no se ha auditado — se deja para
+// una fase futura, tal como se acordó.
+function resolverAccesoCaja(permiso) {
+    if (usuarioActual === null) {
+        return { modo: "legacy", contexto: null, motivo: null };
+    }
+    const resultado = contextoPuedeOperar(permiso);
+    if (!resultado.permitido) {
+        return { modo: "bloqueado", contexto: null, motivo: resultado.motivo };
+    }
+    return { modo: "restringido", contexto: resultado.contexto, motivo: null };
+}
+
+// ═══════════════════════════════════════════════
 // FASE G — AUTORIZACIÓN POS (capa alrededor del POS existente)
 // ═══════════════════════════════════════════════
 // No se reescribe el POS. Esta capa decide UNA cosa: qué almacén está
@@ -4010,6 +4195,104 @@ function contextoPuedeOperar(permiso, usuario = usuarioActual) {
 }
 
 // ═══════════════════════════════════════════════
+// FASE H — GESTIÓN VISUAL DE ROLES Y PERMISOS
+// ═══════════════════════════════════════════════
+// Alcance: ver/editar los permisos de los 4 roles existentes desde la
+// interfaz. NO se crean roles nuevos en esta fase, NO se conectan los otros
+// 31 permisos a ninguna función de negocio (eso es Fase J), y NO se toca
+// POS/FIFO/ventas/pagos/caja/movimientos/tiendas/almacenes.
+//
+// La lista de checkboxes se genera 100% desde CATALOGO_PERMISOS (única
+// fuente de verdad, cero HTML duplicado) y el guardado reutiliza
+// actualizarRol() de la Fase B — no existe una segunda ruta para escribir
+// permisos.
+
+function renderListaRoles() {
+    const cont = document.getElementById("rolesLista");
+    if (!cont) return;
+    cont.innerHTML = DB.roles.map((r, i) => {
+        const enUso = DB.usuarios.filter(u => u.rolId === r.id).length;
+        const esSistema = !!r.clave;
+        return `
+        <div class="cfg-row" onclick="abrirModalRol('${r.id}')">
+          <div class="cfg-row-icon" style="background:rgba(167,139,250,0.12)">🛡️</div>
+          <div class="cfg-row-body">
+            <span class="cfg-row-titulo">${escapeHtml(r.nombre)} ${esSistema ? '<span style="opacity:.6;font-size:11px">· Sistema</span>' : ''}</span>
+            <span class="cfg-row-sub">${(r.permisos || []).length} permiso(s) · ${enUso} usuario(s)</span>
+          </div>
+          <span class="cfg-row-arrow">›</span>
+        </div>${i < DB.roles.length - 1 ? '<div class="cfg-row-sep"></div>' : ''}`;
+    }).join("");
+}
+
+function abrirModalRol(id) {
+    const rol = DB.roles.find(r => r.id === id);
+    if (!rol) return;
+    document.getElementById("rolEditandoId").value = rol.id;
+    document.getElementById("modalRolTitulo").innerText = `🛡️ ${rol.nombre}`;
+
+    const permisosDelRol = new Set(rol.permisos || []);
+    const cont = document.getElementById("rolPermisosContenedor");
+    cont.innerHTML = Object.entries(CATALOGO_PERMISOS).map(([categoria, items]) => `
+        <div class="cfg-grupo-label" style="margin-top:16px">${escapeHtml(categoria).toUpperCase()}</div>
+        <div class="cfg-grupo">
+          ${items.map(([clave, etiqueta], j) => `
+            <div class="cfg-toggle-row2">
+              <span class="cfg-row-titulo">${escapeHtml(etiqueta)}</span>
+              <label class="cfg-toggle">
+                <input type="checkbox" class="rolPermisoCheck" value="${clave}" ${permisosDelRol.has(clave) ? "checked" : ""}>
+                <span class="cfg-toggle-slider"></span>
+              </label>
+            </div>${j < items.length - 1 ? '<div class="cfg-row-sep"></div>' : ''}`).join("")}
+        </div>
+    `).join("");
+
+    document.getElementById("modalRol").classList.remove("oculto");
+}
+
+function cerrarModalRol() {
+    document.getElementById("modalRol").classList.add("oculto");
+}
+
+function guardarPermisosRol() {
+    const id = document.getElementById("rolEditandoId").value;
+    const rol = DB.roles.find(r => r.id === id);
+    if (!rol) return;
+
+    // Fase J4: segunda comprobación justo antes de tocar DB.
+    const acceso = resolverAccesoModulo("gestionar_roles");
+    if (acceso.modo === "bloqueado") { alert(`⛔ No se pueden guardar los permisos:\n\n${acceso.motivo}`); return; }
+
+    const permisosElegidos = Array.from(document.querySelectorAll(".rolPermisoCheck"))
+        .filter(chk => chk.checked)
+        .map(chk => chk.value);
+
+    // Confirmación adicional al modificar al Administrador: no le imponemos
+    // permisos obligatorios, pero sí avisamos con claridad antes de guardar
+    // por si se está a punto de quitarle algo por accidente.
+    if (id === "rol_admin") {
+        const quitados = (rol.permisos || []).filter(p => !permisosElegidos.includes(p));
+        if (quitados.length > 0) {
+            const ok = confirm(
+                `⚠️ Estás a punto de quitarle ${quitados.length} permiso(s) al rol Administrador.\n\n` +
+                `Esto puede limitar lo que el administrador puede hacer en la app, incluida la propia gestión de usuarios/roles.\n\n` +
+                `¿Confirmas que quieres guardar estos cambios?`
+            );
+            if (!ok) return;
+        }
+    }
+
+    try {
+        actualizarRol(id, { permisos: permisosElegidos });
+    } catch (e) {
+        alert("⚠️ " + e.message);
+        return;
+    }
+    cerrarModalRol();
+    renderListaRoles();
+}
+
+// ═══════════════════════════════════════════════
 // FASE E — TIENDAS Y CAJAS (interfaz)
 // ═══════════════════════════════════════════════
 // Regla fija de esta fase: la cadena Caja → Tienda → Almacén debe quedar
@@ -4073,6 +4356,10 @@ function cerrarModalTienda() {
 }
 
 function guardarTienda() {
+    // Fase J4: segunda comprobación justo antes de tocar DB.
+    const acceso = resolverAccesoModulo("gestionar_tiendas");
+    if (acceso.modo === "bloqueado") { alert(`⛔ No se puede guardar la tienda:\n\n${acceso.motivo}`); return; }
+
     const id = document.getElementById("tiendaEditandoId").value || null;
     const nombre = document.getElementById("tiendaNombre").value.trim();
     const descripcion = document.getElementById("tiendaDescripcion").value.trim();
@@ -4151,6 +4438,10 @@ function cerrarModalCaja() {
 }
 
 function guardarCaja() {
+    // Fase J4: segunda comprobación justo antes de tocar DB.
+    const acceso = resolverAccesoModulo("gestionar_cajas");
+    if (acceso.modo === "bloqueado") { alert(`⛔ No se puede guardar la caja:\n\n${acceso.motivo}`); return; }
+
     const id = document.getElementById("cajaEditandoId").value || null;
     const nombre = document.getElementById("cajaNombre").value.trim();
     const tiendaId = document.getElementById("cajaTienda").value;
@@ -4284,6 +4575,10 @@ async function pinYaUsadoPorOtro(pin, idExcluir) {
 }
 
 async function guardarUsuario() {
+    // Fase J4: segunda comprobación justo antes de tocar DB.
+    const accesoGuardar = resolverAccesoModulo("gestionar_usuarios");
+    if (accesoGuardar.modo === "bloqueado") { alert(`⛔ No se puede guardar el usuario:\n\n${accesoGuardar.motivo}`); return; }
+
     const id = document.getElementById("usuarioEditandoId").value || null;
     const nombre = document.getElementById("usuarioNombre").value.trim();
     const rolId = document.getElementById("usuarioRol").value;
@@ -4346,6 +4641,13 @@ async function guardarUsuario() {
 function toggleActivoUsuario(id, nuevoValor) {
     const u = DB.usuarios.find(x => x.id === id);
     if (!u) return;
+    // Fase J4: segunda comprobación justo antes de tocar DB.
+    const acceso = resolverAccesoModulo("gestionar_usuarios");
+    if (acceso.modo === "bloqueado") {
+        alert(`⛔ No puedes cambiar el estado de este usuario:\n\n${acceso.motivo}`);
+        renderListaUsuarios(); // revierte el toggle visualmente
+        return;
+    }
     if (!nuevoValor) {
         const otrosAdminsActivos = DB.usuarios.filter(x => x.id !== id && x.rolId === "rol_admin" && x.activo !== false).length;
         if (u.rolId === "rol_admin" && otrosAdminsActivos === 0) {
@@ -4636,6 +4938,8 @@ function confirmarEliminarAlmacen() {
 let productoTransfSeleccionado = null;
 
 function abrirModalTransferencia() {
+    const acceso = resolverAccesoModulo("transferir_mercancia");
+    if (acceso.modo === "bloqueado") { alert(`⛔ No puedes hacer transferencias:\n\n${acceso.motivo}`); return; }
     const a = DB.almacenes.find(al => al.id === almacenActualId);
     if (!a) return;
     if (a.permiteTransferencias === false) {
@@ -4678,6 +4982,9 @@ function seleccionarProductoTransferencia(id) {
 }
 
 document.getElementById("btnConfirmarTransferencia").addEventListener("click", () => {
+    // Fase J1: segunda comprobación justo antes de mover stock.
+    const acceso = resolverAccesoModulo("transferir_mercancia");
+    if (acceso.modo === "bloqueado") { alert(`⛔ No se puede confirmar la transferencia:\n\n${acceso.motivo}`); return; }
     const origen = DB.almacenes.find(al => al.id === almacenActualId);
     if (!origen) return;
     const productoId = document.getElementById("transfProducto").value;
@@ -5039,6 +5346,9 @@ function cerrarModalGasto() {
 }
 
 document.getElementById("btnGuardarGasto").addEventListener("click", () => {
+    // Fase J3: segunda comprobación justo antes de tocar DB.
+    const acceso = resolverAccesoModulo("registrar_gastos");
+    if (acceso.modo === "bloqueado") { alert(`⛔ No se puede guardar el gasto:\n\n${acceso.motivo}`); return; }
     const concepto = document.getElementById("gasConcepto").value.trim();
     const monto = Number(document.getElementById("gasMonto").value);
     const categoria = document.getElementById("gasCategoria").value;
@@ -5071,6 +5381,9 @@ document.getElementById("btnGuardarGasto").addEventListener("click", () => {
 function eliminarGastoActual() {
     if (!editandoGastoId) return;
     if (!confirm("¿Eliminar este gasto?")) return;
+    // Fase J3: segunda comprobación justo antes de tocar DB.
+    const acceso = resolverAccesoModulo("registrar_gastos");
+    if (acceso.modo === "bloqueado") { alert(`⛔ No se pudo eliminar:\n\n${acceso.motivo}`); return; }
     DB.eliminarGasto(editandoGastoId);
     cerrarModalGasto();
     mostrarGastos();
@@ -5135,6 +5448,8 @@ function generarGastoRecurrente(idOriginal) {
 
 // ── Dashboard Financiero ──
 function abrirDashboardFinanciero() {
+    const acceso = resolverAccesoModulo("ver_estadisticas");
+    if (acceso.modo === "bloqueado") { alert(`⛔ No puedes ver estadísticas:\n\n${acceso.motivo}`); return; }
     mostrarPantalla("pantallaDashboardFinanciero");
     document.getElementById("btnFlotante").classList.add("ocultar-boton");
     actualizarDashboardFinanciero();
@@ -5380,6 +5695,8 @@ function renderAbonosCliente() {
 
 // ── Modal Cliente ──
 function abrirModalCliente(id) {
+    const acceso = resolverAccesoModulo("editar_clientes");
+    if (acceso.modo === "bloqueado") { alert(`⛔ No puedes crear/editar clientes:\n\n${acceso.motivo}`); return; }
     if (id) {
         const c = DB.buscarCliente(id); if (!c) return;
         editandoClienteId = id;
@@ -5406,6 +5723,9 @@ function cerrarModalCliente() {
 }
 
 document.getElementById("btnGuardarCliente").addEventListener("click", () => {
+    // Fase J2: segunda comprobación justo antes de tocar DB (crear o editar).
+    const acceso = resolverAccesoModulo("editar_clientes");
+    if (acceso.modo === "bloqueado") { alert(`⛔ No se puede guardar el cliente:\n\n${acceso.motivo}`); return; }
     const nombre = document.getElementById("cliNombre").value.trim();
     if (!nombre) { alert("⚠️ El nombre es obligatorio."); return; }
     const datos = {
@@ -5433,6 +5753,9 @@ function eliminarClienteActual() {
     const c = DB.buscarCliente(editandoClienteId);
     if (DB.saldoCliente(editandoClienteId) > 0) { alert("⚠️ Este cliente tiene deuda pendiente. Sáldala antes de eliminarlo."); return; }
     if (!confirm(`¿Eliminar a ${c.nombre}? Esta acción no se puede deshacer.`)) return;
+    // Fase J2: segunda comprobación justo antes de tocar DB.
+    const acceso = resolverAccesoModulo("editar_clientes");
+    if (acceso.modo === "bloqueado") { alert(`⛔ No se pudo eliminar:\n\n${acceso.motivo}`); return; }
     DB.eliminarCliente(editandoClienteId);
     cerrarModalCliente();
     mostrarToast("✅ Cliente eliminado");
@@ -6578,6 +6901,8 @@ function renderHistorialProveedor() {
 }
 
 function abrirModalProveedor(id) {
+    const acceso = resolverAccesoModulo("editar_proveedores");
+    if (acceso.modo === "bloqueado") { alert(`⛔ No puedes crear/editar proveedores:\n\n${acceso.motivo}`); return; }
     if (id) {
         const p = DB.buscarProveedor(id); if (!p) return;
         editandoProveedorId = id;
@@ -6606,6 +6931,9 @@ function abrirModalProveedor(id) {
 function cerrarModalProveedor() { document.getElementById("modalProveedor").classList.add("oculto"); editandoProveedorId = null; }
 
 document.getElementById("btnGuardarProveedor").addEventListener("click", () => {
+    // Fase J2: segunda comprobación justo antes de tocar DB.
+    const acceso = resolverAccesoModulo("editar_proveedores");
+    if (acceso.modo === "bloqueado") { alert(`⛔ No se puede guardar el proveedor:\n\n${acceso.motivo}`); return; }
     const nombre = document.getElementById("provNombre").value.trim();
     if (!nombre) { alert("⚠️ El nombre es obligatorio."); return; }
     const datos = {
@@ -6633,6 +6961,9 @@ function eliminarProveedorActual() {
     if (!editandoProveedorId) return;
     const p = DB.buscarProveedor(editandoProveedorId);
     if (!confirm(`¿Eliminar a ${p.nombre}?`)) return;
+    // Fase J2: segunda comprobación justo antes de tocar DB.
+    const acceso = resolverAccesoModulo("editar_proveedores");
+    if (acceso.modo === "bloqueado") { alert(`⛔ No se pudo eliminar:\n\n${acceso.motivo}`); return; }
     DB.productos.filter(pr => pr.proveedor === p.nombre).forEach(pr => DB.actualizarProducto(pr.id, { proveedor: "" }));
     DB.eliminarProveedor(editandoProveedorId);
     cerrarModalProveedor(); mostrarToast("✅ Proveedor eliminado"); volverProveedores();
@@ -7077,6 +7408,8 @@ function deshacerEliminarPOS() {
 
 // ── Descuentos: usan el modal genérico (ver MODAL GENÉRICO más abajo) ──
 function abrirDescuentoItem(idx) {
+    const acceso = resolverAccesoModulo("aplicar_descuento");
+    if (acceso.modo === "bloqueado") { mostrarToastPOS({ texto: "⛔ No tienes permiso para aplicar descuentos" }); return; }
     const item = posCarritoItems[idx];
     if (!item) return;
     mostrarModalGenerico({
@@ -7101,6 +7434,8 @@ function abrirDescuentoItem(idx) {
 }
 
 function abrirDescuentoGlobal() {
+    const acceso = resolverAccesoModulo("aplicar_descuento");
+    if (acceso.modo === "bloqueado") { mostrarToastPOS({ texto: "⛔ No tienes permiso para aplicar descuentos" }); return; }
     mostrarModalGenerico({
         tipo: "porcentaje",
         titulo: "Descuento sobre toda la venta",
@@ -7365,6 +7700,28 @@ function ejecutarVentaPOS() {
         const fueraDeAlmacen = posCarritoItems.find(item => item.producto.almacen !== accesoVenta.almacenAutorizado.nombre);
         if (fueraDeAlmacen) {
             alert(`⛔ El carrito contiene "${fueraDeAlmacen.producto.nombre}", que no pertenece a tu almacén autorizado (${accesoVenta.almacenAutorizado.nombre}). Elimínalo del carrito e inténtalo de nuevo.`);
+            return;
+        }
+    }
+
+    // ── Fase J5: vender_fiado y aplicar_descuento, en el mismo punto que
+    // el guard de Fase G — antes de tocar stock/FIFO/factura/caja/movimientos.
+    // Una venta de contado (efectivo/transferencia/mixto) nunca pasa por el
+    // primer check; una venta sin ningún descuento activo nunca pasa por el
+    // segundo. Ninguno de los dos toca resolverAccesoPOS() ni el guard de
+    // almacén de arriba.
+    if (posMetodoActual === "fiado") {
+        const accesoFiado = resolverAccesoModulo("vender_fiado");
+        if (accesoFiado.modo === "bloqueado") {
+            alert(`⛔ No puedes vender a fiado:\n\n${accesoFiado.motivo}`);
+            return;
+        }
+    }
+    const hayDescuentoActivo = posDescGlobalValor > 0 || posCarritoItems.some(item => (item.descuento || 0) > 0);
+    if (hayDescuentoActivo) {
+        const accesoDescuento = resolverAccesoModulo("aplicar_descuento");
+        if (accesoDescuento.modo === "bloqueado") {
+            alert(`⛔ No puedes cobrar con descuento aplicado:\n\n${accesoDescuento.motivo}\n\nQuita el descuento del carrito para continuar con la venta al precio completo.`);
             return;
         }
     }

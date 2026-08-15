@@ -1673,6 +1673,15 @@
         </div>
         <span class="cfg-row-arrow">›</span>
       </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-row" onclick="abrirSubConfig('roles')">
+        <div class="cfg-row-icon" style="background:rgba(167,139,250,0.12)">🛡️</div>
+        <div class="cfg-row-body">
+          <span class="cfg-row-titulo">Roles y permisos</span>
+          <span class="cfg-row-sub">Qué puede hacer cada rol</span>
+        </div>
+        <span class="cfg-row-arrow">›</span>
+      </div>
     </div>
 
     <!-- GRUPO: NEGOCIO -->
@@ -2438,6 +2447,32 @@
   </div>
 
   <button onclick="guardarCaja()">💾 Guardar Caja</button>
+</div>
+</div>
+
+<!-- SUB: ROLES Y PERMISOS (Fase H) -->
+<div id="subRoles" class="pantalla">
+  <div class="header">
+    <button class="btn-back" onclick="volverConfig()">‹</button>
+    <div class="header-left"><h1>Roles y permisos</h1><p>Qué puede hacer cada rol</p></div>
+  </div>
+  <div class="sub-contenido">
+    <div class="cfg-grupo-label">ROLES</div>
+    <div class="cfg-grupo" id="rolesLista"></div>
+    <div style="height:30px"></div>
+  </div>
+</div>
+
+<!-- MODAL: PERMISOS DE ROL -->
+<div id="modalRol" class="modal oculto">
+<div class="modal-contenido">
+  <div class="modal-header">
+    <h2 id="modalRolTitulo">🛡️ Permisos</h2>
+    <button class="btn-cerrar" onclick="cerrarModalRol()">✕</button>
+  </div>
+  <input type="hidden" id="rolEditandoId">
+  <div id="rolPermisosContenedor"><!-- Generado dinámicamente desde CATALOGO_PERMISOS --></div>
+  <button onclick="guardarPermisosRol()">💾 Guardar Permisos</button>
 </div>
 </div>
 
