@@ -126,17 +126,17 @@ const DB = {
             "registrar_entrada","ajustar_inventario","transferir_mercancia","recibir_transferencia",
             "vender","vender_fiado","aplicar_descuento","anular_venta","devolucion",
             "abrir_caja","cerrar_caja","retiro_caja","consultar_caja",
-            "ver_clientes","editar_clientes","ver_proveedores","editar_proveedores","registrar_gastos",
+            "ver_clientes","editar_clientes","registrar_abono","ver_proveedores","editar_proveedores","registrar_gastos",
             "ver_reportes","ver_estadisticas","gestionar_usuarios","gestionar_roles","gestionar_tiendas",
-            "gestionar_cajas","configuracion","onat","respaldos"],
+            "gestionar_cajas","configuracion","onat","respaldos","editar_movimientos"],
         encargado: ["ver_dashboard","ver_inventario","crear_producto","editar_producto",
             "registrar_entrada","ajustar_inventario","transferir_mercancia","recibir_transferencia",
             "vender","vender_fiado","aplicar_descuento","devolucion",
             "abrir_caja","cerrar_caja","retiro_caja","consultar_caja",
-            "ver_clientes","editar_clientes","ver_proveedores","editar_proveedores","registrar_gastos",
+            "ver_clientes","editar_clientes","registrar_abono","ver_proveedores","editar_proveedores","registrar_gastos",
             "ver_reportes","ver_estadisticas"],
         cajero: ["ver_dashboard","ver_inventario","vender","vender_fiado","abrir_caja","cerrar_caja",
-            "consultar_caja","ver_clientes","editar_clientes"],
+            "consultar_caja","ver_clientes","editar_clientes","registrar_abono"],
         almacenero: ["ver_dashboard","ver_inventario","registrar_entrada","ajustar_inventario",
             "transferir_mercancia","recibir_transferencia"]
     },
@@ -180,6 +180,18 @@ const DB = {
                 activa: true,
                 fechaCreacion: new Date().toISOString()
             }];
+        }
+
+        // 3.5) Fase J7 — el rol Administrador debe tener editar_movimientos
+        // por defecto. Esto cubre TANTO instalaciones nuevas (ya viene en
+        // _ROLES_BASE.administrador arriba) COMO instalaciones migradas
+        // donde rol_admin ya existía de antes sin este permiso. Solo se
+        // AGREGA si falta — nunca se toca ni se quita nada de otros roles
+        // (Encargado/Cajero/Almacenero no reciben este permiso automático;
+        // se asignan a mano desde Roles y permisos si el negocio lo decide).
+        const rolAdminJ7 = this.roles.find(r => r.id === "rol_admin");
+        if (rolAdminJ7 && Array.isArray(rolAdminJ7.permisos) && !rolAdminJ7.permisos.includes("editar_movimientos")) {
+            rolAdminJ7.permisos.push("editar_movimientos");
         }
 
         // 4) Usuario Administrador — solo si no hay ningún usuario todavía.
@@ -243,6 +255,10 @@ const DB = {
     // quedan guardados igual de rápido (unos milisegundos después),
     // pero se ahorran escrituras redundantes.
     _guardarProgramado: false,
+    // Bandera de aviso: evita mostrar el mismo alert() decenas de veces si
+    // el guardado sigue fallando (guardar() se llama muy seguido). Se
+    // reactiva sola en cuanto un guardado vuelve a tener éxito.
+    _errorGuardado: false,
     guardar() {
         if (this._guardarProgramado) return;
         this._guardarProgramado = true;
@@ -250,19 +266,43 @@ const DB = {
     },
     _guardarInmediato() {
         this._guardarProgramado = false;
-        localStorage.setItem("productos", JSON.stringify(this.productos));
-        localStorage.setItem("movimientos", JSON.stringify(this.movimientos));
-        localStorage.setItem("gastos", JSON.stringify(this.gastos));
-        localStorage.setItem("caja", JSON.stringify(this.caja));
-        localStorage.setItem("sesionesCaja", JSON.stringify(this.sesionesCaja));
-        localStorage.setItem("clientes", JSON.stringify(this.clientes));
-        localStorage.setItem("proveedores", JSON.stringify(this.proveedores));
-        localStorage.setItem("almacenes", JSON.stringify(this.almacenes));
-        localStorage.setItem("configuracion", JSON.stringify(this.configuracion));
-        localStorage.setItem("usuarios", JSON.stringify(this.usuarios));
-        localStorage.setItem("roles", JSON.stringify(this.roles));
-        localStorage.setItem("tiendas", JSON.stringify(this.tiendas));
-        localStorage.setItem("cajas", JSON.stringify(this.cajas));
+        try {
+            localStorage.setItem("productos", JSON.stringify(this.productos));
+            localStorage.setItem("movimientos", JSON.stringify(this.movimientos));
+            localStorage.setItem("gastos", JSON.stringify(this.gastos));
+            localStorage.setItem("caja", JSON.stringify(this.caja));
+            localStorage.setItem("sesionesCaja", JSON.stringify(this.sesionesCaja));
+            localStorage.setItem("clientes", JSON.stringify(this.clientes));
+            localStorage.setItem("proveedores", JSON.stringify(this.proveedores));
+            localStorage.setItem("almacenes", JSON.stringify(this.almacenes));
+            localStorage.setItem("configuracion", JSON.stringify(this.configuracion));
+            localStorage.setItem("usuarios", JSON.stringify(this.usuarios));
+            localStorage.setItem("roles", JSON.stringify(this.roles));
+            localStorage.setItem("tiendas", JSON.stringify(this.tiendas));
+            localStorage.setItem("cajas", JSON.stringify(this.cajas));
+            if (this._errorGuardado) {
+                // El problema se resolvió solo (se liberó espacio, etc.):
+                // se avisa que el guardado volvió a la normalidad.
+                this._errorGuardado = false;
+                setTimeout(() => alert("✅ El guardado se recuperó. Tus datos se están guardando con normalidad de nuevo."), 300);
+            }
+        } catch (e) {
+            // No se oculta el error en silencio: queda en consola siempre,
+            // y se avisa al usuario con un alert() — pero solo la primera
+            // vez que falla (mientras _errorGuardado siga en true no se
+            // repite el aviso), para no bloquear la app con alerts
+            // repetidos si el guardado sigue fallando en cada acción.
+            console.error("DB._guardarInmediato(): fallo al guardar en localStorage.", e);
+            if (!this._errorGuardado) {
+                this._errorGuardado = true;
+                setTimeout(() => alert(
+                    "🔴 No se pudieron guardar los últimos cambios.\n\n" +
+                    "Es posible que no quede espacio de almacenamiento en el dispositivo. " +
+                    "Los datos que ves en pantalla podrían NO estar respaldados todavía.\n\n" +
+                    "Haz un respaldo cuanto antes desde Configuración → Respaldo, y libera espacio o revisa datos antiguos si el problema continúa."
+                ), 300);
+            }
+        }
     },
 
     agregarProducto(producto) {
@@ -311,7 +351,7 @@ const DB = {
         return {
             capital, valorVenta, ganancia, margen, stockBajo, reposicionesInternas,
             entradasMes: movMes.filter(m => m.tipo === "entrada").length,
-            salidasMes: movMes.filter(m => m.tipo === "salida").length
+            salidasMes: movMes.filter(m => m.tipo === "salida" && !m.anulado).length
         };
     },
 
@@ -406,18 +446,25 @@ const DB = {
         return this.sesionesCaja.find(s => s.id === this.caja.sesionActiva) || null;
     },
 
-    agregarMovimientoCaja(tipo, monto, concepto) {
+    agregarMovimientoCaja(tipo, monto, concepto, extra = {}) {
         const sesion = this.sesionCajaActiva();
         if (!sesion) return null;
-        const mov = { id: "movcaja_" + Date.now(), tipo, monto: Number(monto) || 0, concepto, fecha: new Date().toISOString() };
+        const mov = { id: "movcaja_" + Date.now(), tipo, monto: Number(monto) || 0, concepto, fecha: new Date().toISOString(), ...extra };
         sesion.movimientosCaja.push(mov);
         this.guardar();
         return mov;
     },
 
-    // Calcula el resumen en vivo de una sesión (ventas por método, gastos, retiros, esperado en caja)
+    // Calcula el resumen en vivo de una sesión (ventas por método, gastos, retiros, devoluciones, esperado en caja)
+    // Fase K (Anular venta / Devolución): las ventas anuladas (m.anulado) se
+    // excluyen por completo — nunca contaron, es como si no hubieran
+    // existido para efectos de caja. Las devoluciones NO tocan la venta
+    // original (que permanece intacta en el historial); en su lugar restan
+    // aquí mismo, y además generan su propio bucket "devoluciones" en
+    // sesion.movimientosCaja, separado de gastos/retiros/abonos, tal como
+    // se aprobó.
     resumenSesion(sesion) {
-        const ventasSesion = this.movimientos.filter(m => m.tipo === "salida" && m.sesionCajaId === sesion.id);
+        const ventasSesion = this.movimientos.filter(m => m.tipo === "salida" && m.sesionCajaId === sesion.id && !m.anulado);
         let efectivo = 0, transferencia = 0, fiado = 0, articulos = 0, ventasTotal = 0, costoTotal = 0;
         const facturas = new Set();
         ventasSesion.forEach(m => {
@@ -433,10 +480,41 @@ const DB = {
         });
         const gastos = sesion.movimientosCaja.filter(mc => mc.tipo === "gasto").reduce((s, mc) => s + mc.monto, 0);
         const retiros = sesion.movimientosCaja.filter(mc => mc.tipo === "retiro").reduce((s, mc) => s + mc.monto, 0);
-        const ganancia = ventasTotal - costoTotal;
+        // Fase J6-A: abonos de deuda, SEPARADOS de las ventas (no se mezclan,
+        // son conceptos contables distintos), pero sí entran al efectivo
+        // esperado cuando el método de pago fue efectivo.
+        const abonosSesion = sesion.movimientosCaja.filter(mc => mc.tipo === "abono");
+        const abonosEfectivo = abonosSesion.filter(a => a.metodoPago === "efectivo").reduce((s, a) => s + a.monto, 0);
+        const abonosTransferencia = abonosSesion.filter(a => a.metodoPago === "transferencia").reduce((s, a) => s + a.monto, 0);
+        // Fase K: devoluciones de dinero, bucket propio (tipo:"devolucion"),
+        // nunca mezclado con "retiro". Sólo el efectivo devuelto reduce lo
+        // que debe haber físicamente en el cajón; la transferencia devuelta
+        // se reporta aparte pero no toca "esperado" (no es billetes).
+        const devolucionesSesion = sesion.movimientosCaja.filter(mc => mc.tipo === "devolucion");
+        const devolucionesEfectivo = devolucionesSesion.filter(d => d.metodoPago === "efectivo").reduce((s, d) => s + d.monto, 0);
+        const devolucionesTransferencia = devolucionesSesion.filter(d => d.metodoPago === "transferencia").reduce((s, d) => s + d.monto, 0);
+        const devolucionesTotal = devolucionesSesion.reduce((s, d) => s + d.monto, 0);
+        // Fase K: la ganancia de la sesión también debe netear el costo de
+        // lo devuelto (no sólo el ingreso), para no mostrar una ganancia
+        // artificialmente baja cuando el producto vuelve al inventario.
+        const costoDevueltoSesion = devolucionesSesion.reduce((s, d) => s + (d.costoDevuelto || 0), 0);
+        // Fase K: ventasTotal/costoTotal/ganancia quedan netos de lo
+        // devuelto (afecta lo que se congela en sesion.cierre y se ve en
+        // Historial de Cajas). "efectivo"/"transferencia" en cambio se
+        // dejan BRUTOS a propósito — igual que abonosEfectivo nunca resta
+        // de "efectivo" — porque representan "ventas cobradas por ese
+        // método", no "dinero que debe quedar en caja" (eso es "esperado").
+        const ventasTotalNeto = ventasTotal - devolucionesTotal;
+        const costoTotalNeto = costoTotal - costoDevueltoSesion;
+        const ganancia = ventasTotalNeto - costoTotalNeto;
         const numVentas = facturas.size || ventasSesion.length;
-        const esperado = sesion.fondoInicial + efectivo - gastos - retiros;
-        return { efectivo, transferencia, fiado, articulos, numVentas, gastos, retiros, ventasTotal, costoTotal, ganancia, esperado };
+        const esperado = sesion.fondoInicial + efectivo + abonosEfectivo - gastos - retiros - devolucionesEfectivo;
+        return {
+            efectivo, transferencia, fiado, articulos, numVentas, gastos, retiros,
+            ventasTotal: ventasTotalNeto, costoTotal: costoTotalNeto, ganancia, esperado,
+            abonosEfectivo, abonosTransferencia,
+            devolucionesEfectivo, devolucionesTransferencia, devolucionesTotal
+        };
     },
 
     // Cierra la sesión activa: calcula todo una última vez y lo congela en sesion.cierre ("fotografía" del día)
@@ -450,6 +528,8 @@ const DB = {
             fechaCierre: new Date().toISOString(),
             fondoInicial: sesion.fondoInicial,
             ventasEfectivo: r.efectivo, ventasTransferencia: r.transferencia, ventasFiado: r.fiado,
+            abonosEfectivo: r.abonosEfectivo, abonosTransferencia: r.abonosTransferencia,
+            devolucionesEfectivo: r.devolucionesEfectivo, devolucionesTransferencia: r.devolucionesTransferencia, devolucionesTotal: r.devolucionesTotal,
             ventasTotal: r.ventasTotal, costoTotal: r.costoTotal, ganancia: r.ganancia,
             gastos: r.gastos, retiros: r.retiros,
             esperado: r.esperado, contado, diferencia,
@@ -528,9 +608,12 @@ const DB = {
     },
 
     // Calcula saldo pendiente (fiados no saldados - abonos)
+    // Fase K: una fiada anulada nunca generó deuda real → se excluye por
+    // completo. Una fiada con devolución parcial sólo debe deuda sobre lo
+    // que el cliente se quedó de verdad (cantidad − cantidadDevuelta).
     saldoCliente(id) {
-        const fiados = this.movimientos.filter(m => m.clienteId === id && m.tipo === "salida" && m.metodoPago === "fiado" && !m.saldado);
-        const totalFiado = fiados.reduce((sum, m) => sum + ((m.precioUnitario || 0) * (m.cantidad || 0)), 0);
+        const fiados = this.movimientos.filter(m => m.clienteId === id && m.tipo === "salida" && m.metodoPago === "fiado" && !m.saldado && !m.anulado);
+        const totalFiado = fiados.reduce((sum, m) => sum + ((m.precioUnitario || 0) * Math.max(0, (m.cantidad || 0) - (m.cantidadDevuelta || 0))), 0);
         const cli = this.buscarCliente(id);
         const totalAbonos = (cli && cli.abonos) ? cli.abonos.reduce((sum, a) => sum + (a.monto || 0), 0) : 0;
         return Math.max(0, totalFiado - totalAbonos);
@@ -541,7 +624,7 @@ const DB = {
         const hoy = new Date();
         return this.movimientos.filter(m =>
             m.clienteId === id && m.tipo === "salida" && m.metodoPago === "fiado" &&
-            !m.saldado && m.fechaVencimiento && new Date(m.fechaVencimiento) < hoy
+            !m.saldado && !m.anulado && m.fechaVencimiento && new Date(m.fechaVencimiento) < hoy
         );
     },
 
@@ -551,7 +634,7 @@ const DB = {
         if (saldo === 0) return "verde";
         const vencidos = this.fiadosVencidos(id);
         if (vencidos.length > 0) return "rojo";
-        const fiados = this.movimientos.filter(m => m.clienteId === id && m.tipo === "salida" && m.metodoPago === "fiado" && !m.saldado);
+        const fiados = this.movimientos.filter(m => m.clienteId === id && m.tipo === "salida" && m.metodoPago === "fiado" && !m.saldado && !m.anulado);
         const masAntiguo = fiados.reduce((min, m) => new Date(m.fecha) < new Date(min.fecha) ? m : min, fiados[0]);
         const diasDeuda = masAntiguo ? (new Date() - new Date(masAntiguo.fecha)) / (1000 * 60 * 60 * 24) : 0;
         return diasDeuda > 30 ? "rojo" : diasDeuda > 7 ? "amarillo" : "verde";
@@ -567,6 +650,246 @@ document.addEventListener("visibilitychange", () => {
 window.addEventListener("pagehide", () => {
     if (DB._guardarProgramado) DB._guardarInmediato();
 });
+
+// ═══════════════════════════════════════════════
+// FASE K — VENTAS NETAS (helpers centrales de Anular venta / Devolución)
+// ═══════════════════════════════════════════════
+// Toda función que antes sumaba "tipo==='salida'" para calcular ingresos,
+// costo o ganancia en un rango de fechas debe pasar por estos helpers en
+// vez de filtrar DB.movimientos a mano — así "excluir anuladas" y "restar
+// devoluciones" quedan escritos UNA sola vez, en vez de repetirse (y poder
+// olvidarse) en cada uno de los ~20 sitios que hacían este cálculo.
+//
+// Reglas que aplican aquí, ya aprobadas:
+//  - Una venta con mov.anulado === true NUNCA cuenta, en ningún cálculo.
+//    La venta original permanece intacta en DB.movimientos (nunca se borra
+//    ni se modifica su cantidad/precio), pero para efectos contables es
+//    como si no hubiera existido.
+//  - Una devolución NO modifica la venta original (mov.cantidad no se
+//    toca). En su lugar crea un movimiento nuevo `tipo:"devolucion"` que
+//    referencia la venta original vía `facturaOriginal`/`movimientoOriginalId`
+//    y guarda su propio `precioUnitario`/`costoReal` (copiados de la línea
+//    original), así se puede restar tanto el ingreso como el costo.
+function movimientosVentaEnRango(inicio, fin) {
+    return DB.movimientos.filter(m => m.tipo === "salida" && !m.anulado && new Date(m.fecha) >= inicio && new Date(m.fecha) <= fin);
+}
+function movimientosDevolucionEnRango(inicio, fin) {
+    return DB.movimientos.filter(m => m.tipo === "devolucion" && new Date(m.fecha) >= inicio && new Date(m.fecha) <= fin);
+}
+// Totales netos (ventas − devoluciones) de un rango de fechas. Usado por
+// Inicio, Gastos, Dashboard Financiero, ONAT y Cierre de Caja por fecha —
+// en todos los sitios donde sólo hace falta un total, no un desglose por
+// producto/método de pago (esos casos se resuelven aparte, ver Reportes).
+function calcularVentasNetas(inicio, fin) {
+    const ventas = movimientosVentaEnRango(inicio, fin);
+    const devoluciones = movimientosDevolucionEnRango(inicio, fin);
+    const ventasBrutas = ventas.reduce((s, m) => s + (m.precioUnitario || 0) * (m.cantidad || 0), 0);
+    const costoBruto = ventas.reduce((s, m) => s + (typeof m.costoReal === "number" ? m.costoReal : 0) * (m.cantidad || 0), 0);
+    const devueltoMonto = devoluciones.reduce((s, m) => s + (m.precioUnitario || 0) * (m.cantidad || 0), 0);
+    const devueltoCosto = devoluciones.reduce((s, m) => s + (typeof m.costoReal === "number" ? m.costoReal : 0) * (m.cantidad || 0), 0);
+    const unidadesVendidas = ventas.reduce((s, m) => s + (m.cantidad || 0), 0);
+    const unidadesDevueltas = devoluciones.reduce((s, m) => s + (m.cantidad || 0), 0);
+    return {
+        ventas, devoluciones,
+        totalVentas: ventasBrutas - devueltoMonto,
+        totalCosto: costoBruto - devueltoCosto,
+        totalGanancia: (ventasBrutas - costoBruto) - (devueltoMonto - devueltoCosto),
+        unidades: unidadesVendidas - unidadesDevueltas
+    };
+}
+
+// Todas las líneas (una por producto) de una venta hecha desde POS que
+// comparten el mismo número de factura. Las salidas manuales (Movimientos)
+// no tienen `factura`, así que nunca aparecen aquí — Anular venta está
+// deliberadamente limitado a ventas de POS, tal como se aprobó.
+function buscarLineasFactura(numeroFactura) {
+    return DB.movimientos.filter(m => m.tipo === "salida" && m.factura === numeroFactura);
+}
+
+// ═══════════════════════════════════════════════
+// FASE K — ANULAR VENTA / DEVOLUCIÓN (autorización)
+// ═══════════════════════════════════════════════
+// Mismo patrón estricto que resolverAccesoEdicionMovimiento() de Fase J7:
+// usuarioActual === null SIEMPRE bloquea (nunca modo compatibilidad), por
+// ser una operación sensible que además puede tocar caja y saldo de un
+// cliente. "lineas" es el conjunto de movimientos "salida" a validar — la
+// factura completa para anular, o una única línea para devolver.
+//
+// Reglas verificadas, en este orden, sobre CADA línea:
+//   1) que ninguna ya esté anulada (una anulación no puede repetirse).
+//   2) que la sesión de caja a la que pertenece no esté cerrada (idéntico
+//      criterio a J7 — la venta jamás se modifica retroactivamente contra
+//      una caja ya cerrada; a partir de aquí queda garantizado que, de
+//      haber una sesión activa, es la MISMA sesión de la venta original,
+//      porque el sistema sólo permite una sesión "abierta" a la vez).
+//   3) que el producto pertenezca al almacén autorizado del usuario.
+//   4) que, si es fiado, el cliente no tenga abonos aplicados — porque
+//      cliente.abonos[] no está vinculado a ninguna factura concreta, así
+//      que no hay forma de saber si ese abono ya pagó (total o
+//      parcialmente) justo esta venta. Ante la duda, se bloquea.
+function resolverAccesoOperacionVenta(permiso, lineas) {
+    if (usuarioActual === null) {
+        return { permitido: false, motivo: "Debes iniciar sesión con tu usuario para esta operación." };
+    }
+    const resultado = contextoPuedeOperar(permiso);
+    if (!resultado.permitido) return { permitido: false, motivo: resultado.motivo };
+    const contexto = resultado.contexto;
+
+    for (const mov of lineas) {
+        if (mov.anulado) {
+            return { permitido: false, motivo: "Esta venta ya fue anulada." };
+        }
+        if (mov.sesionCajaId) {
+            const sesion = DB.sesionesCaja.find(s => s.id === mov.sesionCajaId);
+            if (sesion && sesion.estado === "cerrada") {
+                return { permitido: false, motivo: "Esta venta pertenece a una caja ya cerrada y no puede modificarse." };
+            }
+        }
+        const p = DB.buscarProducto(mov.productoId);
+        if (p && p.almacen !== contexto.almacen.nombre) {
+            return { permitido: false, motivo: `Esta venta incluye productos del almacén "${p.almacen}", fuera de tu almacén autorizado (${contexto.almacen.nombre}).` };
+        }
+        if (mov.metodoPago === "fiado" && mov.clienteId) {
+            const cli = DB.buscarCliente(mov.clienteId);
+            if (cli && Array.isArray(cli.abonos) && cli.abonos.length > 0) {
+                return { permitido: false, motivo: `${cli.nombre} ya tiene abonos registrados y no es posible determinar qué parte corresponde a esta factura. Resuélvelo manualmente antes de continuar.` };
+            }
+        }
+    }
+    return { permitido: true, motivo: null, contexto };
+}
+
+// Anula una factura completa de POS. NUNCA borra ni modifica cantidad/
+// precio/costoReal de las líneas originales — sólo las marca. El stock se
+// revierte (aproximación FIFO aprobada: DB.devolverALoteMasViejo con el
+// costoReal ya guardado). El dinero devuelto (si lo hubo) se registra como
+// un movimiento nuevo en la sesión de caja actualmente activa — que, dado
+// el bloqueo de sesión cerrada de arriba, es necesariamente la misma
+// sesión de la venta original.
+function anularVenta(numeroFactura, motivo) {
+    const lineas = buscarLineasFactura(numeroFactura);
+    if (lineas.length === 0) return { ok: false, motivo: "Factura no encontrada." };
+
+    const acceso = resolverAccesoOperacionVenta("anular_venta", lineas);
+    if (!acceso.permitido) return { ok: false, motivo: acceso.motivo };
+
+    const ahora = new Date().toISOString();
+    let montoEfectivoDevuelto = 0, montoTransferenciaDevuelto = 0, costoEfectivoDevuelto = 0, costoTransferenciaDevuelto = 0;
+
+    lineas.forEach(mov => {
+        // Sólo se revierte lo que todavía seguía "vivo" en esta línea — si
+        // ya tenía una devolución parcial previa, esa parte no se vuelve a
+        // devolver dos veces.
+        const cantidadARevertir = Math.max(0, (mov.cantidad || 0) - (mov.cantidadDevuelta || 0));
+        if (cantidadARevertir > 0) {
+            const p = DB.buscarProducto(mov.productoId);
+            if (p) {
+                if (p.usaFifo) {
+                    DB.devolverALoteMasViejo(mov.productoId, cantidadARevertir, typeof mov.costoReal === "number" ? mov.costoReal : (p.compra || 0));
+                } else {
+                    DB.actualizarProducto(mov.productoId, { cantidad: (p.cantidad || 0) + cantidadARevertir });
+                }
+            }
+        }
+        const proporcion = (mov.cantidad || 0) > 0 ? cantidadARevertir / mov.cantidad : 0;
+        const costoUnit = typeof mov.costoReal === "number" ? mov.costoReal : 0;
+        if (mov.metodoPago === "efectivo") {
+            montoEfectivoDevuelto += (mov.precioUnitario || 0) * cantidadARevertir;
+            costoEfectivoDevuelto += costoUnit * cantidadARevertir;
+        } else if (mov.metodoPago === "transfermovil" || mov.metodoPago === "enzona" || mov.metodoPago === "transferencia") {
+            montoTransferenciaDevuelto += (mov.precioUnitario || 0) * cantidadARevertir;
+            costoTransferenciaDevuelto += costoUnit * cantidadARevertir;
+        } else if (mov.metodoPago === "mixto") {
+            montoEfectivoDevuelto += (mov.montoEfectivo || 0) * proporcion;
+            montoTransferenciaDevuelto += (mov.montoTransferencia || 0) * proporcion;
+            costoEfectivoDevuelto += costoUnit * cantidadARevertir * proporcion;
+            costoTransferenciaDevuelto += costoUnit * cantidadARevertir * (1 - proporcion);
+        }
+        // La línea original permanece: sólo se le agrega el estado de
+        // anulación, nunca se le toca cantidad/precioUnitario/costoReal.
+        mov.anulado = true;
+        mov.motivoAnulacion = motivo || "";
+        mov.fechaAnulacion = ahora;
+        mov.anuladoPorUsuarioId = usuarioActual ? usuarioActual.id : null;
+    });
+
+    // Impacto en caja: sólo si hubo dinero físico/transferencia y hay una
+    // sesión abierta ahora mismo (bucket propio "devolucion", nunca "retiro").
+    if (montoEfectivoDevuelto > 0 && DB.sesionCajaActiva()) {
+        DB.agregarMovimientoCaja("devolucion", montoEfectivoDevuelto, `Anulación factura #${numeroFactura}`, { metodoPago: "efectivo", facturaOriginal: numeroFactura, costoDevuelto: costoEfectivoDevuelto });
+    }
+    if (montoTransferenciaDevuelto > 0 && DB.sesionCajaActiva()) {
+        DB.agregarMovimientoCaja("devolucion", montoTransferenciaDevuelto, `Anulación factura #${numeroFactura}`, { metodoPago: "transferencia", facturaOriginal: numeroFactura, costoDevuelto: costoTransferenciaDevuelto });
+    }
+
+    DB.guardar();
+    return { ok: true };
+}
+
+// Devuelve una cantidad parcial o total de UNA línea de producto de una
+// factura. Nunca modifica mov.cantidad — usa mov.cantidadDevuelta como
+// contador acumulado para saber cuánto queda disponible. Crea su propio
+// movimiento histórico `tipo:"devolucion"` referenciando la venta original
+// (para que Reportes/ONAT/Inicio/etc. puedan restarlo vía
+// movimientosDevolucionEnRango()), y —si corresponde— un movimiento de
+// caja separado para el impacto físico en efectivo/transferencia.
+function registrarDevolucionLinea(movId, cantidadDevolver, motivo, metodoReembolso) {
+    const mov = DB.movimientos.find(m => m.id === movId && m.tipo === "salida");
+    if (!mov) return { ok: false, motivo: "Movimiento no encontrado." };
+
+    const acceso = resolverAccesoOperacionVenta("devolucion", [mov]);
+    if (!acceso.permitido) return { ok: false, motivo: acceso.motivo };
+
+    const yaDevuelta = mov.cantidadDevuelta || 0;
+    const disponible = Math.max(0, (mov.cantidad || 0) - yaDevuelta);
+    const cantidad = Number(cantidadDevolver) || 0;
+    if (cantidad <= 0) return { ok: false, motivo: "La cantidad a devolver debe ser mayor a 0." };
+    if (cantidad > disponible) return { ok: false, motivo: `Sólo quedan ${disponible} ${disponible === 1 ? "unidad disponible" : "unidades disponibles"} para devolver de esta línea.` };
+
+    const p = DB.buscarProducto(mov.productoId);
+    if (p) {
+        if (p.usaFifo) {
+            DB.devolverALoteMasViejo(mov.productoId, cantidad, typeof mov.costoReal === "number" ? mov.costoReal : (p.compra || 0));
+        } else {
+            DB.actualizarProducto(mov.productoId, { cantidad: (p.cantidad || 0) + cantidad });
+        }
+    }
+
+    // Contador acumulado — nunca se toca mov.cantidad.
+    mov.cantidadDevuelta = yaDevuelta + cantidad;
+
+    const ahora = new Date().toISOString();
+    const costoUnit = typeof mov.costoReal === "number" ? mov.costoReal : 0;
+
+    // Movimiento contable: referencia la venta original, se resta en todos
+    // los cálculos que usan movimientosVentaEnRango()/movimientosDevolucionEnRango().
+    DB.registrarMovimiento("devolucion", mov.productoId, {
+        cantidad,
+        precioUnitario: mov.precioUnitario,
+        costoReal: mov.costoReal,
+        facturaOriginal: mov.factura || null,
+        movimientoOriginalId: mov.id,
+        metodoPago: mov.metodoPago === "fiado" ? "fiado" : (metodoReembolso || (mov.metodoPago === "efectivo" ? "efectivo" : "transferencia")),
+        clienteId: mov.clienteId || null,
+        cliente: mov.cliente || "",
+        sesionCajaId: DB.caja.sesionActiva || null,
+        usuarioId: usuarioActual ? usuarioActual.id : null,
+        motivo: motivo || "",
+        fecha: ahora
+    });
+
+    // Impacto en caja física: sólo efectivo/transferencia, nunca fiado
+    // (una devolución fiada sólo reduce deuda, no toca el cajón).
+    if (mov.metodoPago !== "fiado" && DB.sesionCajaActiva()) {
+        const metodoCaja = metodoReembolso === "transferencia" ? "transferencia" : "efectivo";
+        DB.agregarMovimientoCaja("devolucion", (mov.precioUnitario || 0) * cantidad, `Devolución factura #${mov.factura || "—"}`, {
+            metodoPago: metodoCaja, facturaOriginal: mov.factura || null, costoDevuelto: costoUnit * cantidad
+        });
+    }
+
+    DB.guardar();
+    return { ok: true };
+}
 
 // ═══════════════════════════════════════════════
 // FASE B — ROLES Y PERMISOS
@@ -593,7 +916,8 @@ const CATALOGO_PERMISOS = {
         ["registrar_entrada", "Registrar entradas de mercancía"],
         ["ajustar_inventario", "Ajustar inventario"],
         ["transferir_mercancia", "Transferir mercancía entre almacenes"],
-        ["recibir_transferencia", "Recibir transferencias"]
+        ["recibir_transferencia", "Recibir transferencias"],
+        ["editar_movimientos", "Editar movimientos históricos (cantidad, precio, nota)"]
     ],
     "Ventas / POS": [
         ["vender", "Vender en el POS"],
@@ -611,6 +935,7 @@ const CATALOGO_PERMISOS = {
     "Clientes y proveedores": [
         ["ver_clientes", "Ver clientes"],
         ["editar_clientes", "Editar/crear clientes"],
+        ["registrar_abono", "Registrar abonos de clientes (fiado)"],
         ["ver_proveedores", "Ver proveedores"],
         ["editar_proveedores", "Editar/crear proveedores"]
     ],
@@ -1343,17 +1668,20 @@ function renderSheetSesionCaja() {
     document.getElementById("scArticulos").innerText = r.articulos;
     document.getElementById("scGastos").innerText = r.gastos.toLocaleString("es-CU") + " " + moneda;
     document.getElementById("scRetiros").innerText = r.retiros.toLocaleString("es-CU") + " " + moneda;
+    const scDevolEl = document.getElementById("scDevoluciones");
+    if (scDevolEl) scDevolEl.innerText = r.devolucionesTotal.toLocaleString("es-CU") + " " + moneda;
     document.getElementById("scHoraApertura").innerText = new Date(sesion.fechaApertura).toLocaleTimeString("es-CU", { hour: "2-digit", minute: "2-digit" });
     document.getElementById("scFondoInicial").innerText = sesion.fondoInicial.toLocaleString("es-CU") + " " + moneda;
 
     const listaEl = document.getElementById("scMovimientosLista");
     if (sesion.movimientosCaja.length === 0) {
-        listaEl.innerHTML = `<div class="cfg-row" style="cursor:default;"><div class="cfg-row-body"><span class="cfg-row-sub">Sin gastos ni retiros registrados</span></div></div>`;
+        listaEl.innerHTML = `<div class="cfg-row" style="cursor:default;"><div class="cfg-row-body"><span class="cfg-row-sub">Sin gastos, retiros ni devoluciones registrados</span></div></div>`;
     } else {
+        const iconoMovCaja = { gasto: "💸", retiro: "🏦", devolucion: "↩️" };
         listaEl.innerHTML = [...sesion.movimientosCaja].reverse().map((mc, i, arr) => `
             <div class="cfg-row" style="cursor:default;">
                 <div class="cfg-row-body">
-                    <span class="cfg-row-titulo">${mc.tipo === "gasto" ? "💸" : "🏦"} ${mc.concepto}</span>
+                    <span class="cfg-row-titulo">${iconoMovCaja[mc.tipo] || "🏦"} ${mc.concepto}</span>
                     <span class="cfg-row-sub">${new Date(mc.fecha).toLocaleTimeString("es-CU", { hour: "2-digit", minute: "2-digit" })}</span>
                 </div>
                 <strong style="color:var(--warn);">-${mc.monto.toLocaleString("es-CU")} ${moneda}</strong>
@@ -1419,6 +1747,7 @@ function abrirModalCierreSesionCaja() {
         <div class="dashfin-row"><span>+ Ventas efectivo</span><strong>${r.efectivo.toLocaleString("es-CU")} ${moneda}</strong></div>
         <div class="dashfin-row dashfin-resta"><span>− Gastos</span><strong>${r.gastos.toLocaleString("es-CU")} ${moneda}</strong></div>
         <div class="dashfin-row dashfin-resta"><span>− Retiros</span><strong>${r.retiros.toLocaleString("es-CU")} ${moneda}</strong></div>
+        <div class="dashfin-row dashfin-resta"><span>− Devoluciones (efectivo)</span><strong>${r.devolucionesEfectivo.toLocaleString("es-CU")} ${moneda}</strong></div>
         <div class="dashfin-sep"></div>
         <div class="dashfin-row dashfin-total"><span>Debe haber</span><strong>${r.esperado.toLocaleString("es-CU")} ${moneda}</strong></div>
     `;
@@ -1528,6 +1857,7 @@ function abrirDetalleHistorialCaja(id) {
             <div class="dashfin-row"><span>Fiado</span><strong>${c.ventasFiado.toLocaleString("es-CU")} ${moneda}</strong></div>
             <div class="dashfin-row dashfin-resta"><span>− Gastos</span><strong>${c.gastos.toLocaleString("es-CU")} ${moneda}</strong></div>
             <div class="dashfin-row dashfin-resta"><span>− Retiros</span><strong>${c.retiros.toLocaleString("es-CU")} ${moneda}</strong></div>
+            <div class="dashfin-row dashfin-resta"><span>− Devoluciones</span><strong>${(c.devolucionesTotal||0).toLocaleString("es-CU")} ${moneda}</strong></div>
             <div class="dashfin-sep"></div>
             <div class="dashfin-row dashfin-subtotal"><span>Ventas totales</span><strong>${c.ventasTotal.toLocaleString("es-CU")} ${moneda}</strong></div>
             <div class="dashfin-row dashfin-subtotal"><span>Ganancia (FIFO)</span><strong>${c.ganancia.toLocaleString("es-CU")} ${moneda}</strong></div>
@@ -1887,15 +2217,11 @@ function renderResumenHoy() {
     const inicioHoy = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate(), 0, 0, 0);
     const finHoy = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate(), 23, 59, 59);
 
-    const ventasHoyMov = DB.movimientos.filter(m => {
-        if (m.tipo !== "salida") return false;
-        const f = new Date(m.fecha);
-        return f >= inicioHoy && f <= finHoy;
-    });
-
-    const totalVentas = ventasHoyMov.reduce((s, m) => s + (m.precioUnitario || 0) * (m.cantidad || 0), 0);
-    const totalGanancia = ventasHoyMov.reduce((s, m) => s + ((m.precioUnitario || 0) - (typeof m.costoReal === "number" ? m.costoReal : 0)) * (m.cantidad || 0), 0);
-    const totalUnidades = ventasHoyMov.reduce((s, m) => s + (m.cantidad || 0), 0);
+    // Fase K: netas de anuladas/devueltas — ver movimientosVentaEnRango().
+    const neto = calcularVentasNetas(inicioHoy, finHoy);
+    const totalVentas = neto.totalVentas;
+    const totalGanancia = neto.totalGanancia;
+    const totalUnidades = neto.unidades;
     const margen = totalVentas > 0 ? Math.round((totalGanancia / totalVentas) * 100) : 0;
     const totalFiados = DB.clientes.reduce((s, c) => s + DB.saldoCliente(c.id), 0);
 
@@ -1958,9 +2284,9 @@ function actualizarInicio() {
     if (sinStock === 0) puntaje += 20;
 
     // +20 si la ganancia del mes es positiva
+    // Fase K: netas de anuladas/devueltas.
     const iniMes = new Date(anio, mes, 1), finMes = new Date(anio, mes+1, 0, 23, 59, 59);
-    const ventasMes = DB.movimientos.filter(m => m.tipo === "salida" && new Date(m.fecha) >= iniMes && new Date(m.fecha) <= finMes);
-    const gananciaMes = ventasMes.reduce((s, m) => s + ((m.precioUnitario||0) - (typeof m.costoReal==="number"?m.costoReal:0)) * (m.cantidad||0), 0);
+    const gananciaMes = calcularVentasNetas(iniMes, finMes).totalGanancia;
     if (gananciaMes > 0) puntaje += 20;
 
     // +20 si no hay clientes morosos (rojo)
@@ -2117,9 +2443,9 @@ function alertasInteligentes() {
 
     DB.productos.forEach(p => {
         if (p.cantidad <= 0) return;
-        // Ventas de los últimos 30 días para este producto
+        // Ventas de los últimos 30 días para este producto (Fase K: excluye anuladas)
         const ventas = DB.movimientos.filter(m =>
-            m.productoId === p.id && m.tipo === "salida" && new Date(m.fecha) >= hace30
+            m.productoId === p.id && m.tipo === "salida" && !m.anulado && new Date(m.fecha) >= hace30
         );
         const totalVendido = ventas.reduce((s, m) => s + (m.cantidad || 0), 0);
         if (totalVendido === 0) return; // Sin historial de ventas, no podemos proyectar
@@ -3422,19 +3748,45 @@ function mostrarHistorial() {
         const unidad = p ? (p.unidad || "") : "";
         const fecha = new Date(m.fecha);
         const fechaStr = fecha.toLocaleDateString("es-CU") + " " + fecha.toLocaleTimeString("es-CU", { hour: "2-digit", minute: "2-digit" });
+
+        // Fase K: una devolución (tipo:"devolucion") es un movimiento propio,
+        // distinto de una salida — nunca se edita ni se anula, sólo referencia
+        // a la factura original.
+        if (m.tipo === "devolucion") {
+            lista.innerHTML += `
+            <div class="mov-card">
+                <div class="mov-icono" style="background:rgba(255,107,74,0.1)">↩️</div>
+                <div class="mov-info">
+                    <h4>${nombre}</h4>
+                    <p>Devolución${m.facturaOriginal ? " · Factura #" + m.facturaOriginal : ""}${m.motivo ? " · " + m.motivo : ""}</p>
+                    <p style="font-size:11px;color:var(--text3);margin-top:2px;">${fechaStr}</p>
+                </div>
+                <div class="mov-cantidad"><strong style="color:var(--warn);">↩️ ${m.cantidad} ${unidad}</strong></div>
+            </div>`;
+            return;
+        }
+
         let detalle = "";
         if (m.tipo === "ajuste") detalle = `🔢 Ajuste: ${m.cantidadAnterior} → ${m.cantidadNueva}`;
         else if (m.tipo === "entrada") detalle = m.proveedor ? `Proveedor: ${m.proveedor}` : m.nota || "Entrada de mercancía";
-        else { detalle = motivos[m.motivo] || "Salida"; if (m.metodoPago) detalle += ` · ${pagos[m.metodoPago] || m.metodoPago}`; if (m.cliente) detalle += ` · ${m.cliente}`; }
+        else { detalle = motivos[m.motivo] || "Salida"; if (m.metodoPago) detalle += ` · ${pagos[m.metodoPago] || m.metodoPago}`; if (m.cliente) detalle += ` · ${m.cliente}`; if (m.factura) detalle += ` · Factura #${m.factura}`; }
         const esEntrada = m.tipo === "entrada" || m.tipo === "ajuste";
         const icono = m.tipo === "ajuste" ? "🔢" : esEntrada ? "📥" : "📤";
         const claseIcono = m.tipo === "ajuste" ? "" : esEntrada ? "mov-entrada" : "mov-salida";
         const signo = m.tipo === "ajuste" ? "" : esEntrada ? "+" : "-";
+        // Fase K: badges de estado + click para abrir el detalle de factura
+        // (sólo ventas POS, es decir con m.factura). No hay botones de
+        // anular/devolver aquí — viven exclusivamente en Detalle de Factura.
+        const badgeAnulada = m.anulado ? `<span class="badge-stock" style="background:rgba(255,107,74,0.15);color:var(--warn);">❌ Anulada</span>` : "";
+        const badgeDevuelta = (!m.anulado && (m.cantidadDevuelta || 0) > 0)
+            ? `<span class="badge-stock" style="background:rgba(245,197,66,0.15);color:var(--gold);">↩️ ${m.cantidadDevuelta >= m.cantidad ? "Devuelta" : "Devuelta parcial"}</span>` : "";
+        const claseFila = m.anulado ? "mov-card mov-card-anulada" : "mov-card";
+        const clickFactura = (m.tipo === "salida" && m.factura) ? ` onclick="abrirDetalleFactura('${m.factura}')" style="cursor:pointer;"` : "";
         lista.innerHTML += `
-        <div class="mov-card">
+        <div class="${claseFila}"${clickFactura}>
             <div class="mov-icono ${claseIcono}" style="${m.tipo==='ajuste'?'background:rgba(245,197,66,0.1)':''}">${icono}</div>
             <div class="mov-info">
-                <h4>${nombre} ${m.editado?'<span class="badge-pro">Editado</span>':''}</h4>
+                <h4>${nombre} ${m.editado?'<span class="badge-pro">Editado</span>':''}${badgeAnulada}${badgeDevuelta}</h4>
                 <p>${detalle}</p>
                 <p style="font-size:11px;color:var(--text3);margin-top:2px;">${fechaStr}</p>
             </div>
@@ -3445,7 +3797,7 @@ function mostrarHistorial() {
                 <span class="mov-costo-real">Costo real: ${m.costoReal.toLocaleString("es-CU", {maximumFractionDigits:0})} ${DB.configuracion.moneda||'CUP'}/u</span>
                 <span class="mov-ganancia-real">Ganancia: ${((m.precioUnitario - m.costoReal) * m.cantidad).toLocaleString("es-CU", {maximumFractionDigits:0})} ${DB.configuracion.moneda||'CUP'}</span>
                 ` : ''}
-                ${(p && p.usaFifo) ? '' : `<button onclick="abrirEditarMov('${m.id}')" style="background:none;border:none;color:var(--gold);font-size:14px;cursor:pointer;margin-top:4px;">✏️ <span class="chip-pro">PRO</span></button>`}
+                ${(!m.factura && !(p && p.usaFifo)) ? `<button onclick="event.stopPropagation();abrirEditarMov('${m.id}')" style="background:none;border:none;color:var(--gold);font-size:14px;cursor:pointer;margin-top:4px;">✏️ <span class="chip-pro">PRO</span></button>` : ''}
             </div>
         </div>`;
     });
@@ -3487,11 +3839,19 @@ document.getElementById("btnConfirmarAjuste").addEventListener("click", () => {
     const nota = document.getElementById("ajusteNota").value;
     if (isNaN(cantidad) || cantidad < 0) { alert("⚠️ Ingresa una cantidad válida."); return; }
 
+    // Se captura ANTES de tocar lotes/stock: para productos FIFO, p es la
+    // misma referencia que vive en DB.productos, y DB.agregarLote()/
+    // DB.consumirLotesFIFO() la mutan en sitio (vía sincronizarLotes) —
+    // si se leyera p.cantidad después de esas llamadas, ya mostraría el
+    // valor nuevo en vez del anterior, tanto en el historial como en el
+    // mensaje de confirmación.
+    const cantidadAntes = p.cantidad;
+
     let nuevaCantidad, descripcion, diferencia;
-    if (tipo === "cantidad_real") { diferencia = cantidad - p.cantidad; descripcion = `Conteo: ${p.cantidad} → ${cantidad}`; }
+    if (tipo === "cantidad_real") { diferencia = cantidad - cantidadAntes; descripcion = `Conteo: ${cantidadAntes} → ${cantidad}`; }
     else if (tipo === "agregar") { diferencia = cantidad; descripcion = `Ajuste +${cantidad}`; }
     else {
-        if (cantidad > p.cantidad) { alert(`⚠️ No puedes restar más del stock (${p.cantidad}).`); return; }
+        if (cantidad > cantidadAntes) { alert(`⚠️ No puedes restar más del stock (${cantidadAntes}).`); return; }
         diferencia = -cantidad; descripcion = `Ajuste -${cantidad}`;
     }
 
@@ -3501,12 +3861,12 @@ document.getElementById("btnConfirmarAjuste").addEventListener("click", () => {
         else if (diferencia < 0) DB.consumirLotesFIFO(ajustandoId, Math.abs(diferencia));
         nuevaCantidad = DB.buscarProducto(ajustandoId).cantidad;
     } else {
-        nuevaCantidad = p.cantidad + diferencia;
+        nuevaCantidad = cantidadAntes + diferencia;
         DB.actualizarProducto(ajustandoId, { cantidad: nuevaCantidad });
     }
 
-    DB.registrarMovimiento("ajuste", ajustandoId, { cantidad: Math.abs(diferencia), cantidadAnterior: p.cantidad, cantidadNueva: nuevaCantidad, motivo, nota: nota || descripcion });
-    alert(`✅ Stock actualizado.\n${p.nombre}: ${p.cantidad} → ${nuevaCantidad} ${p.unidad||""}`);
+    DB.registrarMovimiento("ajuste", ajustandoId, { cantidad: Math.abs(diferencia), cantidadAnterior: cantidadAntes, cantidadNueva: nuevaCantidad, motivo, nota: nota || descripcion });
+    alert(`✅ Stock actualizado.\n${p.nombre}: ${cantidadAntes} → ${nuevaCantidad} ${p.unidad||""}`);
     cerrarAjuste(); mostrarInventario(); actualizarInicio();
 });
 
@@ -3520,6 +3880,12 @@ function abrirEditarMov(movId) {
         alert("⚠️ Este producto usa control de lotes (FIFO). Editar movimientos antiguos podría descuadrar los costos reales, así que está desactivado para estos productos.\n\nSi necesitas corregir el stock, usa un Ajuste en su lugar.");
         return;
     }
+    // Fase J7: exige permiso editar_movimientos + sesión identificada +
+    // almacén autorizado + que la caja de ese movimiento no esté cerrada.
+    // abrirEditarMov() queda protegido contra llamada directa, no solo
+    // contra el botón oculto en mostrarHistorial().
+    const accesoEdicion = resolverAccesoEdicionMovimiento(mov);
+    if (!accesoEdicion.permitido) { alert(`⛔ No puedes editar este movimiento:\n\n${accesoEdicion.motivo}`); return; }
     editandoMovId = movId;
     document.getElementById("editMovNombre").innerText = p.nombre;
     document.getElementById("editMovTipo").innerText = mov.tipo === "entrada" ? "📥 Entrada" : "📤 Salida";
@@ -3541,6 +3907,33 @@ document.getElementById("btnConfirmarEditMov").addEventListener("click", () => {
     if (!editandoMovId) return;
     const mov = DB.movimientos.find(m => m.id === editandoMovId); if (!mov) return;
     const p = DB.buscarProducto(mov.productoId); if (!p) return;
+
+    // Fase J7: segunda comprobación, justo antes de tocar cantidad/precio/
+    // stock. Vuelve a validar usuario, contexto, permiso, almacén y estado
+    // de la sesión de caja — no confía en que la comprobación de
+    // abrirEditarMov() siga siendo válida (pudo cambiar el contexto entre
+    // que se abrió el modal y que se confirma el cambio).
+    const accesoEdicionConfirm = resolverAccesoEdicionMovimiento(mov);
+    if (!accesoEdicionConfirm.permitido) {
+        alert(`⛔ No se pudo guardar el cambio:\n\n${accesoEdicionConfirm.motivo}`);
+        cerrarEditarMov();
+        return;
+    }
+    // Defensa adicional: FIFO nunca es editable por este camino, aunque el
+    // botón que abre el modal ya lo oculta para estos productos.
+    if (p.usaFifo) {
+        alert("⚠️ Este producto usa control de lotes (FIFO) y no se puede editar por este medio.");
+        cerrarEditarMov();
+        return;
+    }
+    // Fiado: cambiar cantidad/precio de una venta a crédito recalcula el
+    // saldo pendiente del cliente (DB.saldoCliente() lee estos mismos
+    // campos en vivo), así que se advierte explícitamente antes de seguir.
+    if (mov.metodoPago === "fiado") {
+        const continuar = confirm("⚠️ Este movimiento es una venta a crédito (fiado). Cambiar la cantidad o el precio modificará el saldo pendiente del cliente.\n\n¿Confirmas que quieres continuar?");
+        if (!continuar) return;
+    }
+
     const cantidadAnterior = mov.cantidad;
     const cantidadNueva = Number(document.getElementById("editMovCantidad").value);
     const precio = Number(document.getElementById("editMovPrecio").value);
@@ -4055,6 +4448,48 @@ function resolverAccesoModulo(permiso) {
         return { modo: "bloqueado", contexto: null, motivo: resultado.motivo };
     }
     return { modo: "restringido", contexto: resultado.contexto, motivo: null };
+}
+
+// ═══════════════════════════════════════════════
+// FASE J7 — EDICIÓN DE MOVIMIENTOS HISTÓRICOS
+// ═══════════════════════════════════════════════
+// A propósito NO sigue el mismo patrón de "modo compatibilidad" que
+// resolverAccesoModulo/resolverAccesoPOS/resolverAccesoCaja. Editar un
+// movimiento ya registrado (cantidad, precio) es una operación sensible
+// que además puede alterar el saldo de un cliente fiado o el historial de
+// una caja, así que aquí usuarioActual === null se BLOQUEA siempre —
+// nunca cae al comportamiento anterior a Fase C. Además de permiso y
+// contexto válidos, exige dos cosas que ninguna otra fase revisaba:
+//   1) que la caja a la que pertenece el movimiento no esté cerrada
+//      (sesion.cierre es una fotografía histórica que no debe alterarse
+//      en silencio, ni siquiera por un Administrador con el permiso);
+//   2) que el movimiento pertenezca al almacén autorizado del usuario
+//      (mismo criterio que usa el POS vía obtenerContextoUsuario()).
+function resolverAccesoEdicionMovimiento(mov) {
+    if (usuarioActual === null) {
+        return { permitido: false, motivo: "Debes iniciar sesión con tu usuario para editar movimientos históricos." };
+    }
+    const resultado = contextoPuedeOperar("editar_movimientos");
+    if (!resultado.permitido) {
+        return { permitido: false, motivo: resultado.motivo };
+    }
+    const contexto = resultado.contexto;
+
+    // Sesión de caja cerrada: nunca editable, incluso con el permiso.
+    if (mov.sesionCajaId) {
+        const sesion = DB.sesionesCaja.find(s => s.id === mov.sesionCajaId);
+        if (sesion && sesion.estado === "cerrada") {
+            return { permitido: false, motivo: "Este movimiento pertenece a una caja ya cerrada y no puede modificarse." };
+        }
+    }
+
+    // Almacén: el movimiento debe pertenecer al almacén autorizado del usuario.
+    const p = DB.buscarProducto(mov.productoId);
+    if (p && p.almacen !== contexto.almacen.nombre) {
+        return { permitido: false, motivo: `Este movimiento pertenece al almacén "${p.almacen}", fuera de tu almacén autorizado (${contexto.almacen.nombre}).` };
+    }
+
+    return { permitido: true, motivo: null, contexto };
 }
 
 // ═══════════════════════════════════════════════
@@ -5107,6 +5542,20 @@ function mostrarHistorialAlmacen() {
             </div>`;
         }
 
+        // Fase K: devolución es su propio tipo, nunca se agrupa con salida.
+        if (m.tipo === "devolucion") {
+            return `
+            <div class="mov-card">
+                <div class="mov-icono" style="background:rgba(255,107,74,0.1)">↩️</div>
+                <div class="mov-info">
+                    <h4>${nombre}</h4>
+                    <p>Devolución${m.facturaOriginal ? " · Factura #" + m.facturaOriginal : ""}</p>
+                    <p style="font-size:11px;color:var(--text3);margin-top:2px;">${fechaStr}</p>
+                </div>
+                <div class="mov-cantidad"><strong style="color:var(--warn);">↩️ ${m.cantidad} ${unidad}</strong></div>
+            </div>`;
+        }
+
         const esEntrada = m.tipo === "entrada" || m.tipo === "ajuste";
         const icono = m.tipo === "ajuste" ? "🔢" : esEntrada ? "📥" : "📤";
         const claseIcono = m.tipo === "ajuste" ? "" : esEntrada ? "mov-entrada" : "mov-salida";
@@ -5114,13 +5563,18 @@ function mostrarHistorialAlmacen() {
         let detalle = "";
         if (m.tipo === "ajuste") detalle = `🔢 Ajuste: ${m.cantidadAnterior} → ${m.cantidadNueva}`;
         else if (m.tipo === "entrada") detalle = m.proveedor ? `Proveedor: ${m.proveedor}` : m.nota || "Entrada de mercancía";
-        else detalle = m.nota || "Salida";
+        else { detalle = m.nota || "Salida"; if (m.factura) detalle += ` · Factura #${m.factura}`; }
+        const badgeAnulada = m.anulado ? `<span class="badge-stock" style="background:rgba(255,107,74,0.15);color:var(--warn);">❌ Anulada</span>` : "";
+        const badgeDevuelta = (!m.anulado && (m.cantidadDevuelta || 0) > 0)
+            ? `<span class="badge-stock" style="background:rgba(245,197,66,0.15);color:var(--gold);">↩️ ${m.cantidadDevuelta >= m.cantidad ? "Devuelta" : "Devuelta parcial"}</span>` : "";
+        const claseFila = m.anulado ? "mov-card mov-card-anulada" : "mov-card";
+        const clickFactura = (m.tipo === "salida" && m.factura) ? ` onclick="abrirDetalleFactura('${m.factura}')" style="cursor:pointer;"` : "";
 
         return `
-        <div class="mov-card">
+        <div class="${claseFila}"${clickFactura}>
             <div class="mov-icono ${claseIcono}" style="${m.tipo==='ajuste'?'background:rgba(245,197,66,0.1)':''}">${icono}</div>
             <div class="mov-info">
-                <h4>${nombre}</h4>
+                <h4>${nombre}${badgeAnulada}${badgeDevuelta}</h4>
                 <p>${detalle}</p>
                 <p style="font-size:11px;color:var(--text3);margin-top:2px;">${fechaStr}</p>
             </div>
@@ -5130,6 +5584,232 @@ function mostrarHistorialAlmacen() {
             </div>
         </div>`;
     }).join("");
+}
+
+// ═══════════════════════════════════════════════
+// FASE K — DETALLE DE FACTURA (Anular venta / Devolución)
+// ═══════════════════════════════════════════════
+// Vista agrupada por número de factura, reutilizando el estilo de
+// pantallaFacturaPOS. Los botones de Anular/Devolver viven EXCLUSIVAMENTE
+// aquí — nunca repetidos por renglón en Historial — para evitar que se
+// anule/devuelva por accidente una sola línea de una venta de varios
+// productos pensando que es la factura completa.
+let facturaActualDetalle = null;
+let detalleFacturaOrigen = "pantallaHistorial";
+let devolucionCantidadesTemp = {};
+
+function abrirDetalleFactura(numeroFactura, origenPantalla) {
+    facturaActualDetalle = numeroFactura;
+    detalleFacturaOrigen = origenPantalla || (
+        document.getElementById("pantallaAlmacenDetalle").classList.contains("activa") ? "pantallaAlmacenDetalle" :
+        document.getElementById("pantallaPerfilCliente").classList.contains("activa") ? "pantallaPerfilCliente" :
+        "pantallaHistorial"
+    );
+    mostrarPantalla("pantallaDetalleFactura");
+    document.getElementById("btnFlotante").classList.add("ocultar-boton");
+    renderDetalleFactura();
+}
+
+function volverDesdeDetalleFactura() {
+    mostrarPantalla(detalleFacturaOrigen, "atras");
+    document.getElementById("btnFlotante").classList.add("ocultar-boton");
+    if (detalleFacturaOrigen === "pantallaHistorial") mostrarHistorial();
+    else if (detalleFacturaOrigen === "pantallaAlmacenDetalle") mostrarHistorialAlmacen();
+    else if (detalleFacturaOrigen === "pantallaPerfilCliente") actualizarPerfilCliente();
+}
+
+function renderDetalleFactura() {
+    const numeroFactura = facturaActualDetalle;
+    const lineas = buscarLineasFactura(numeroFactura);
+    const moneda = DB.configuracion.moneda || "CUP";
+    const badgeEl = document.getElementById("dfacEstadoBadge");
+    const accionesEl = document.getElementById("dfacAcciones");
+
+    if (lineas.length === 0) {
+        document.getElementById("dfacTitulo").innerText = "Factura no encontrada";
+        document.getElementById("dfacSub").innerText = "—";
+        document.getElementById("dfacDatos").innerHTML = "";
+        document.getElementById("dfacProductos").innerHTML = `<p style="text-align:center;color:var(--text2);padding:20px 0;">No se encontraron movimientos para esta factura.</p>`;
+        document.getElementById("dfacTotal").innerText = "0 " + moneda;
+        accionesEl.innerHTML = "";
+        badgeEl.innerHTML = "";
+        return;
+    }
+
+    const primera = lineas[0];
+    const todasAnuladas = lineas.every(m => m.anulado);
+    const totalOriginal = lineas.reduce((s, m) => s + (m.precioUnitario || 0) * (m.cantidad || 0), 0);
+    const totalDevuelto = lineas.reduce((s, m) => s + (m.precioUnitario || 0) * (m.cantidadDevuelta || 0), 0);
+    const totalNeto = todasAnuladas ? 0 : totalOriginal - totalDevuelto;
+
+    document.getElementById("dfacTitulo").innerText = "Factura #" + numeroFactura;
+    document.getElementById("dfacSub").innerText = new Date(primera.fecha).toLocaleString("es-CU", { dateStyle: "medium", timeStyle: "short" });
+
+    if (todasAnuladas) {
+        badgeEl.innerText = "❌ ANULADA";
+        badgeEl.style.cssText = "background:rgba(255,107,74,0.12);color:var(--warn);border:1px solid rgba(255,107,74,0.3);";
+    } else if (lineas.some(m => (m.cantidadDevuelta || 0) > 0)) {
+        const unidOriginal = lineas.reduce((s, m) => s + (m.cantidad || 0), 0);
+        const unidDevuelta = lineas.reduce((s, m) => s + (m.cantidadDevuelta || 0), 0);
+        badgeEl.innerText = unidDevuelta >= unidOriginal ? "↩️ DEVUELTA TOTALMENTE" : "↩️ DEVOLUCIÓN PARCIAL";
+        badgeEl.style.cssText = "background:rgba(245,197,66,0.12);color:var(--gold);border:1px solid rgba(245,197,66,0.3);";
+    } else {
+        badgeEl.innerText = "✅ VENTA VÁLIDA";
+        badgeEl.style.cssText = "background:rgba(0,232,150,0.12);color:var(--accent);border:1px solid rgba(0,232,150,0.3);";
+    }
+
+    const pagos = { efectivo: "💵 Efectivo", transfermovil: "📱 Transfermóvil", enzona: "💳 EnZona", transferencia: "🏦 Transferencia", fiado: "📦 Fiado", mixto: "🔀 Mixto" };
+    const usuarioVenta = primera.usuarioId ? DB.usuarios.find(u => u.id === primera.usuarioId) : null;
+    const sesionVenta = primera.sesionCajaId ? DB.sesionesCaja.find(s => s.id === primera.sesionCajaId) : null;
+    let datosHtml = `
+        <div class="cfg-row" style="cursor:default;"><div class="cfg-row-body"><span class="cfg-row-titulo">Cliente</span><span class="cfg-row-sub">${primera.cliente || "Venta al público"}</span></div></div>
+        <div class="cfg-row-sep"></div>
+        <div class="cfg-row" style="cursor:default;"><div class="cfg-row-body"><span class="cfg-row-titulo">Método de pago</span><span class="cfg-row-sub">${pagos[primera.metodoPago] || primera.metodoPago || "—"}</span></div></div>
+        <div class="cfg-row-sep"></div>
+        <div class="cfg-row" style="cursor:default;"><div class="cfg-row-body"><span class="cfg-row-titulo">Vendido por</span><span class="cfg-row-sub">${usuarioVenta ? usuarioVenta.nombre : "—"}</span></div></div>
+        <div class="cfg-row-sep"></div>
+        <div class="cfg-row" style="cursor:default;"><div class="cfg-row-body"><span class="cfg-row-titulo">Sesión de caja</span><span class="cfg-row-sub">${sesionVenta ? (new Date(sesionVenta.fechaApertura).toLocaleDateString("es-CU") + (sesionVenta.estado === "cerrada" ? " · Cerrada" : " · Abierta")) : "—"}</span></div></div>`;
+    if (todasAnuladas) {
+        datosHtml += `
+        <div class="cfg-row-sep"></div>
+        <div class="cfg-row" style="cursor:default;"><div class="cfg-row-body"><span class="cfg-row-titulo">Motivo de anulación</span><span class="cfg-row-sub">${primera.motivoAnulacion || "—"}</span></div></div>
+        <div class="cfg-row-sep"></div>
+        <div class="cfg-row" style="cursor:default;"><div class="cfg-row-body"><span class="cfg-row-titulo">Anulada el</span><span class="cfg-row-sub">${primera.fechaAnulacion ? new Date(primera.fechaAnulacion).toLocaleString("es-CU") : "—"}</span></div></div>`;
+    }
+    document.getElementById("dfacDatos").innerHTML = datosHtml;
+
+    document.getElementById("dfacProductos").innerHTML = lineas.map(m => {
+        const p = DB.buscarProducto(m.productoId);
+        const nombre = p ? p.nombre : "Producto eliminado";
+        const subtotal = (m.precioUnitario || 0) * (m.cantidad || 0);
+        const devuelta = m.cantidadDevuelta || 0;
+        return `
+        <div class="gas-card" style="cursor:default;">
+            <div class="gas-card-icono">${p ? (ICONOS[p.categoria] || "📦") : "📦"}</div>
+            <div class="gas-card-info">
+                <h4>${nombre}</h4>
+                <p>${m.cantidad} ${p ? (p.unidad || "") : ""} × ${(m.precioUnitario || 0).toLocaleString("es-CU")} ${moneda}${devuelta > 0 ? ` · ↩️ ${devuelta} devuelta${devuelta > 1 ? 's' : ''}` : ""}</p>
+            </div>
+            <div class="gas-card-monto">${subtotal.toLocaleString("es-CU")} ${moneda}</div>
+        </div>`;
+    }).join("");
+
+    document.getElementById("dfacTotal").innerText = totalNeto.toLocaleString("es-CU") + " " + moneda;
+
+    // Acciones: se muestran sólo si el usuario tiene el permiso Y la
+    // operación es posible en este momento. La revalidación real ocurre
+    // otra vez justo antes de escribir (abrirModalAnularVenta/Devolucion y
+    // confirmarAnularVenta/Devolucion), esto es sólo para decidir qué
+    // botones ofrecer.
+    let accionesHtml = "";
+    if (!todasAnuladas) {
+        const accesoAnular = resolverAccesoOperacionVenta("anular_venta", lineas);
+        if (accesoAnular.permitido) {
+            accionesHtml += `<button class="alm-btn-transferir" style="border-color:rgba(255,107,74,0.4);background:rgba(255,107,74,0.08);color:var(--warn);" onclick="abrirModalAnularVenta()">❌ Anular venta</button>`;
+        }
+        const lineasConDisponible = lineas.filter(m => ((m.cantidad || 0) - (m.cantidadDevuelta || 0)) > 0);
+        if (lineasConDisponible.length > 0) {
+            const accesoDevolver = resolverAccesoOperacionVenta("devolucion", lineasConDisponible);
+            if (accesoDevolver.permitido) {
+                accionesHtml += `<button class="alm-btn-transferir" style="border-color:rgba(245,197,66,0.4);background:rgba(245,197,66,0.08);color:var(--gold);" onclick="abrirModalDevolucion()">↩️ Devolver productos</button>`;
+            }
+        }
+    }
+    accionesEl.innerHTML = accionesHtml;
+}
+
+// ── Modal: Anular venta ──
+function abrirModalAnularVenta() {
+    if (!facturaActualDetalle) return;
+    const lineas = buscarLineasFactura(facturaActualDetalle);
+    const acceso = resolverAccesoOperacionVenta("anular_venta", lineas);
+    if (!acceso.permitido) { alert(`⛔ No puedes anular esta venta:\n\n${acceso.motivo}`); return; }
+    document.getElementById("anularVentaMotivo").value = "";
+    document.getElementById("modalAnularVenta").classList.remove("oculto");
+}
+
+function cerrarModalAnularVenta() {
+    document.getElementById("modalAnularVenta").classList.add("oculto");
+}
+
+function confirmarAnularVenta() {
+    if (!facturaActualDetalle) return;
+    const motivo = document.getElementById("anularVentaMotivo").value.trim();
+    if (!motivo) { alert("⚠️ Escribe el motivo de la anulación."); return; }
+    if (!confirm(`¿Confirmas anular la factura #${facturaActualDetalle}? El stock se devolverá al inventario y esta acción no se puede deshacer.`)) return;
+    // Segunda comprobación, justo antes de escribir.
+    const resultado = anularVenta(facturaActualDetalle, motivo);
+    if (!resultado.ok) { alert(`⛔ No se pudo anular la venta:\n\n${resultado.motivo}`); return; }
+    cerrarModalAnularVenta();
+    mostrarToast("✅ Venta anulada");
+    renderDetalleFactura();
+    actualizarInicio();
+}
+
+// ── Modal: Devolución ──
+function abrirModalDevolucion() {
+    if (!facturaActualDetalle) return;
+    const lineas = buscarLineasFactura(facturaActualDetalle).filter(m => ((m.cantidad || 0) - (m.cantidadDevuelta || 0)) > 0);
+    if (lineas.length === 0) { alert("No queda nada disponible para devolver en esta factura."); return; }
+    const acceso = resolverAccesoOperacionVenta("devolucion", lineas);
+    if (!acceso.permitido) { alert(`⛔ No puedes devolver productos de esta venta:\n\n${acceso.motivo}`); return; }
+
+    devolucionCantidadesTemp = {};
+    document.getElementById("devolucionLineas").innerHTML = lineas.map(m => {
+        const p = DB.buscarProducto(m.productoId);
+        const nombre = p ? p.nombre : "Producto eliminado";
+        const disponible = (m.cantidad || 0) - (m.cantidadDevuelta || 0);
+        devolucionCantidadesTemp[m.id] = 0;
+        return `
+        <div style="background:var(--surface2); border:1px solid var(--border); border-radius:12px; padding:10px 12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                <span style="font-size:14px; font-weight:600;">${nombre}</span>
+                <span style="font-size:12px; color:var(--text2);">Disponible: ${disponible}</span>
+            </div>
+            <input type="number" min="0" max="${disponible}" value="0" placeholder="0"
+                oninput="devolucionCantidadesTemp['${m.id}'] = Math.max(0, Math.min(${disponible}, Number(this.value)||0)); this.value = devolucionCantidadesTemp['${m.id}'];"
+                style="width:100%; padding:8px 10px; border-radius:8px; border:1px solid var(--border); background:var(--surface); color:var(--text); font-size:14px;">
+        </div>`;
+    }).join("");
+
+    // El selector de método de reembolso sólo hace falta si al menos una
+    // línea disponible no es fiada (una devolución fiada nunca toca caja).
+    const necesitaMetodo = lineas.some(m => m.metodoPago !== "fiado");
+    document.getElementById("devolucionMetodoReembolsoWrap").classList.toggle("oculto", !necesitaMetodo);
+    if (necesitaMetodo) {
+        const primeraNoFiada = lineas.find(m => m.metodoPago !== "fiado");
+        document.getElementById("devolucionMetodoReembolso").value = primeraNoFiada.metodoPago === "efectivo" ? "efectivo" : "transferencia";
+    }
+    document.getElementById("devolucionMotivo").value = "";
+    document.getElementById("modalDevolucion").classList.remove("oculto");
+}
+
+function cerrarModalDevolucion() {
+    document.getElementById("modalDevolucion").classList.add("oculto");
+}
+
+function confirmarDevolucion() {
+    if (!facturaActualDetalle) return;
+    const motivo = document.getElementById("devolucionMotivo").value.trim();
+    const metodoReembolso = document.getElementById("devolucionMetodoReembolso").value;
+    const idsConCantidad = Object.keys(devolucionCantidadesTemp).filter(id => devolucionCantidadesTemp[id] > 0);
+    if (idsConCantidad.length === 0) { alert("⚠️ Indica al menos una cantidad a devolver."); return; }
+    if (!confirm("¿Confirmas registrar esta devolución?")) return;
+
+    for (const movId of idsConCantidad) {
+        // Segunda comprobación, justo antes de escribir cada línea.
+        const resultado = registrarDevolucionLinea(movId, devolucionCantidadesTemp[movId], motivo, metodoReembolso);
+        if (!resultado.ok) {
+            alert(`⛔ No se pudo completar la devolución:\n\n${resultado.motivo}`);
+            cerrarModalDevolucion();
+            renderDetalleFactura();
+            return;
+        }
+    }
+    cerrarModalDevolucion();
+    mostrarToast("✅ Devolución registrada");
+    renderDetalleFactura();
+    actualizarInicio();
 }
 
 // ═══════════════════════════════════════════════
@@ -5156,7 +5836,7 @@ function mostrarEstadisticasAlmacen() {
         return idsProductosAlmacen.has(m.productoId);
     });
     const entradas = movimientos30.filter(m => m.tipo === "entrada").length;
-    const salidas = movimientos30.filter(m => m.tipo === "salida").length;
+    const salidas = movimientos30.filter(m => m.tipo === "salida" && !m.anulado).length;
     const transferencias = movimientos30.filter(m => m.tipo === "transferencia").length;
 
     document.getElementById("almEstEntradas").innerText = entradas + " movimiento" + (entradas !== 1 ? "s" : "");
@@ -5265,13 +5945,8 @@ function mostrarGastos() {
     document.getElementById("gasResumenSemana").innerText = gastosSemana.toLocaleString("es-CU");
     document.getElementById("gasResumenMes").innerText = gastosMes.toLocaleString("es-CU");
 
-    // Ganancia neta del mes = ganancia bruta del mes (ventas - costo FIFO) - gastos del mes
-    const ventasMes = DB.movimientos.filter(m => m.tipo === "salida" && new Date(m.fecha) >= mes.inicio && new Date(m.fecha) <= mes.fin);
-    let gananciaBrutaMes = 0;
-    ventasMes.forEach(m => {
-        const costoUnit = (typeof m.costoReal === "number") ? m.costoReal : 0;
-        gananciaBrutaMes += ((m.precioUnitario || 0) - costoUnit) * (m.cantidad || 0);
-    });
+    // Ganancia neta del mes = ganancia bruta del mes (ventas - costo FIFO, netas de anuladas/devueltas) - gastos del mes
+    const gananciaBrutaMes = calcularVentasNetas(mes.inicio, mes.fin).totalGanancia;
     const gananciaNetaMes = gananciaBrutaMes - gastosMes;
     document.getElementById("gasResumenGananciaNeta").innerText = gananciaNetaMes.toLocaleString("es-CU");
 
@@ -5472,14 +6147,10 @@ function actualizarDashboardFinanciero() {
     document.getElementById("dashFinSubtitulo").innerText = etiqueta;
     const moneda = DB.configuracion.moneda || "CUP";
 
-    const ventas = DB.movimientos.filter(m => m.tipo === "salida" && new Date(m.fecha) >= rango.inicio && new Date(m.fecha) <= rango.fin);
-    let totalVentas = 0, totalCosto = 0;
-    ventas.forEach(m => {
-        totalVentas += (m.precioUnitario || 0) * (m.cantidad || 0);
-        const costoUnit = (typeof m.costoReal === "number") ? m.costoReal : 0;
-        totalCosto += costoUnit * (m.cantidad || 0);
-    });
-    const gananciaBruta = totalVentas - totalCosto;
+    // Fase K: netas de anuladas/devueltas.
+    const netoDashFin = calcularVentasNetas(rango.inicio, rango.fin);
+    const totalVentas = netoDashFin.totalVentas, totalCosto = netoDashFin.totalCosto;
+    const gananciaBruta = netoDashFin.totalGanancia;
 
     const gastosRango = DB.gastosEnRango(rango.inicio, rango.fin);
     const totalGastosRango = totalGastos(gastosRango);
@@ -5641,6 +6312,18 @@ function actualizarPerfilCliente() {
 }
 
 function cambiarTabCliente(tab) {
+    // Fase J6-B: ver_fiados protege el detalle de Fiados/Abonos. Con
+    // ver_clientes (ya protegido en J2) el usuario sigue viendo el cliente
+    // y su saldo básico en el perfil — esto solo bloquea el desglose fino.
+    const acceso = resolverAccesoModulo("ver_fiados");
+    if (acceso.modo === "bloqueado") {
+        const mensaje = `<div class="cfg-info-box2"><span>🔒</span><p>No tienes permiso para ver el detalle de fiados y abonos de este cliente.</p></div>`;
+        document.getElementById("cliContenidoFiados").innerHTML = mensaje;
+        document.getElementById("cliContenidoAbonos").innerHTML = mensaje;
+        document.getElementById("cliContenidoFiados").classList.remove("oculto");
+        document.getElementById("cliContenidoAbonos").classList.add("oculto");
+        return;
+    }
     tabClienteActual = tab;
     document.getElementById("cliTabFiados").classList.toggle("activo", tab === "fiados");
     document.getElementById("cliTabAbonos").classList.toggle("activo", tab === "abonos");
@@ -5660,15 +6343,22 @@ function renderFiadosCliente() {
     el.innerHTML = fiados.map(m => {
         const p = DB.buscarProducto(m.productoId);
         const nombre = p ? p.nombre : "Producto eliminado";
-        const total = (m.precioUnitario||0) * (m.cantidad||0);
+        const cantidadNeta = Math.max(0, (m.cantidad||0) - (m.cantidadDevuelta||0));
+        const total = (m.precioUnitario||0) * cantidadNeta;
         const fecha = new Date(m.fecha).toLocaleDateString("es-CU");
         const vence = m.fechaVencimiento ? " · Vence: " + new Date(m.fechaVencimiento).toLocaleDateString("es-CU") : "";
-        const estado = m.saldado ? `<span style="color:var(--accent);font-size:11px;">✅ Saldado</span>` : `<span style="color:var(--warn);font-size:11px;">⏳ Pendiente</span>`;
+        // Fase K: una fiada anulada nunca debió deuda; una fiada con
+        // devolución parcial sigue "pendiente" pero por el monto neto.
+        const estado = m.anulado
+            ? `<span style="color:var(--warn);font-size:11px;">❌ Anulada</span>`
+            : m.saldado ? `<span style="color:var(--accent);font-size:11px;">✅ Saldado</span>` : `<span style="color:var(--warn);font-size:11px;">⏳ Pendiente</span>`;
+        const badgeDevuelta = (!m.anulado && (m.cantidadDevuelta||0) > 0) ? ` <span style="color:var(--gold);font-size:11px;">↩️ ${cantidadNeta === 0 ? "Devuelta" : "Devuelta parcial"}</span>` : "";
+        const clickFactura = m.factura ? ` onclick="abrirDetalleFactura('${m.factura}')" style="cursor:pointer;"` : "";
         return `
-        <div class="gas-card" style="margin-bottom:8px;">
+        <div class="gas-card" style="margin-bottom:8px;"${clickFactura}>
             <div class="gas-card-icono" style="background:rgba(255,107,74,0.1);">🧾</div>
             <div class="gas-card-info">
-                <h4>${nombre} x${m.cantidad} ${estado}</h4>
+                <h4>${nombre} x${m.cantidad} ${estado}${badgeDevuelta}</h4>
                 <p>${fecha}${vence}</p>
             </div>
             <div class="gas-card-monto">${total.toLocaleString("es-CU")} ${moneda}</div>
@@ -5763,28 +6453,129 @@ function eliminarClienteActual() {
 }
 
 // ── Abonos ──
+// ═══════════════════════════════════════════════
+// FASE J6-A — REGISTRO CENTRAL DE ABONOS (conecta Abono → Caja)
+// ═══════════════════════════════════════════════
+// Punto único de escritura para cualquier abono, sin importar si viene de
+// un abono parcial o de "Saldar todo". Hace DOS cosas, siempre juntas:
+//   1) cliente.abonos[] — exactamente la misma estructura de siempre
+//      ({id, monto, fecha, nota}), así los abonos históricos no se tocan.
+//   2) sesion.movimientosCaja[] — SOLO si hay una sesión de usuario válida
+//      Y una caja abierta. Comparte el mismo id (abonoId) que el registro
+//      del cliente, para poder auditar "Abono X → Cliente → Usuario → Caja
+//      → Sesión" de punta a punta.
+//
+// Regla de caja para esta primera implementación (documentada aquí a
+// propósito, para revisarla más adelante si hace falta):
+//   usuarioActual === null       → modo compatibilidad: se registra SOLO en
+//                                   cliente.abonos[], igual que siempre.
+//   usuarioActual !== null,
+//   contexto inválido            → bloquear, no modificar nada.
+//   usuarioActual !== null,
+//   contexto válido, SIN caja
+//   abierta                      → bloquear el abono por completo (ni
+//                                   efectivo ni transferencia), sin tocar
+//                                   cliente.abonos[]. Es la opción simple
+//                                   que se aprobó para esta fase; separar
+//                                   efectivo/transferencia en este punto
+//                                   queda como mejora futura documentada.
+//   usuarioActual !== null,
+//   contexto válido, CON caja
+//   abierta                      → se registra en ambos lugares.
+//
+// Devuelve { ok: true, abono } o { ok: false, motivo }.
+function registrarAbono(clienteId, monto, fecha, nota, metodoPago) {
+    const c = DB.buscarCliente(clienteId);
+    if (!c) return { ok: false, motivo: "Cliente no encontrado." };
+
+    let contexto = null;
+    if (usuarioActual !== null) {
+        const ctx = obtenerContextoUsuario();
+        if (!ctx.valido) return { ok: false, motivo: ctx.motivo };
+        if (!DB.sesionCajaActiva()) {
+            return { ok: false, motivo: "No hay una caja abierta. Abre caja antes de registrar abonos." };
+        }
+        contexto = ctx;
+    }
+
+    const abonoId = "abono_" + Date.now();
+    const fechaISO = new Date(fecha).toISOString();
+
+    if (!c.abonos) c.abonos = [];
+    c.abonos.push({ id: abonoId, monto, fecha: fechaISO, nota });
+
+    if (contexto) {
+        const sesion = DB.sesionCajaActiva();
+        sesion.movimientosCaja.push({
+            id: "mcaja_" + Date.now(),
+            tipo: "abono",
+            abonoId,
+            clienteId,
+            monto,
+            metodoPago: metodoPago || "efectivo",
+            usuarioId: contexto.usuario.id,
+            tiendaId: contexto.tienda.id,
+            cajaId: contexto.caja.id,
+            sesionCajaId: sesion.id,
+            fecha: fechaISO,
+            nota
+        });
+    }
+
+    DB.guardar();
+    return { ok: true, abono: { id: abonoId } };
+}
+
+let saldandoTodoActivo = false; // Fase J6-B: bandera mínima para que saldarTodo() reutilice el mismo modal/selector de método de pago que un abono parcial, en vez de asumir "efectivo" en silencio.
+
 function abrirModalAbono() {
     const c = DB.buscarCliente(clienteActualId); if (!c) return;
+    const acceso = resolverAccesoModulo("registrar_abono");
+    if (acceso.modo === "bloqueado") { alert(`⛔ No puedes registrar abonos:\n\n${acceso.motivo}`); return; }
+    saldandoTodoActivo = false;
     document.getElementById("abonoClienteNombre").innerText = "Cliente: " + c.nombre + " · Saldo: " + DB.saldoCliente(c.id).toLocaleString("es-CU") + " " + (DB.configuracion.moneda||"CUP");
     document.getElementById("abonoMonto").value = "";
+    document.getElementById("abonoMonto").readOnly = false;
+    document.getElementById("abonoMetodoPago").value = "efectivo";
     document.getElementById("abonoFecha").value = new Date().toISOString().slice(0,10);
     document.getElementById("abonoNota").value = "";
     document.getElementById("modalAbono").classList.remove("oculto");
 }
 
-function cerrarModalAbono() { document.getElementById("modalAbono").classList.add("oculto"); }
+function cerrarModalAbono() {
+    saldandoTodoActivo = false;
+    document.getElementById("abonoMonto").readOnly = false;
+    document.getElementById("modalAbono").classList.add("oculto");
+}
 
 document.getElementById("btnConfirmarAbono").addEventListener("click", () => {
+    // Fase J6-B: segunda comprobación justo antes de tocar DB.
+    const accesoGuardar = resolverAccesoModulo("registrar_abono");
+    if (accesoGuardar.modo === "bloqueado") { alert(`⛔ No se puede registrar el abono:\n\n${accesoGuardar.motivo}`); return; }
+
     const monto = Number(document.getElementById("abonoMonto").value);
+    const metodoPago = document.getElementById("abonoMetodoPago").value;
     const fecha = document.getElementById("abonoFecha").value;
     const nota = document.getElementById("abonoNota").value.trim();
     const c = DB.buscarCliente(clienteActualId); if (!c) return;
     if (!monto || monto <= 0) { alert("⚠️ El monto debe ser mayor a 0."); return; }
     const saldo = DB.saldoCliente(clienteActualId);
     if (monto > saldo) { alert(`⚠️ El abono (${monto}) supera el saldo pendiente (${saldo}). Usa "Saldar todo" si quieres cerrar la deuda.`); return; }
-    if (!c.abonos) c.abonos = [];
-    c.abonos.push({ id: "abono_" + Date.now(), monto, fecha: new Date(fecha).toISOString(), nota });
-    DB.guardar();
+
+    const resultado = registrarAbono(clienteActualId, monto, fecha, nota, metodoPago);
+    if (!resultado.ok) { alert(`⛔ No se pudo registrar el abono:\n\n${resultado.motivo}`); return; }
+
+    // Si este abono vino de "Saldar todo", marcar los fiados como saldados
+    // (mismo comportamiento de siempre, ahora con el método de pago correcto
+    // en vez de asumir efectivo).
+    if (saldandoTodoActivo) {
+        DB.movimientos.filter(m => m.clienteId === clienteActualId && m.tipo === "salida" && m.metodoPago === "fiado" && !m.saldado && !m.anulado)
+            .forEach(m => m.saldado = true);
+        DB.guardar();
+    }
+    saldandoTodoActivo = false;
+    document.getElementById("abonoMonto").readOnly = false;
+
     mostrarToast(`✅ Abono de ${monto.toLocaleString("es-CU")} registrado`);
     cerrarModalAbono();
     actualizarPerfilCliente();
@@ -5792,17 +6583,22 @@ document.getElementById("btnConfirmarAbono").addEventListener("click", () => {
 
 function saldarTodo() {
     const c = DB.buscarCliente(clienteActualId); if (!c) return;
+    const acceso = resolverAccesoModulo("registrar_abono");
+    if (acceso.modo === "bloqueado") { alert(`⛔ No puedes saldar deudas:\n\n${acceso.motivo}`); return; }
     const saldo = DB.saldoCliente(clienteActualId);
     if (saldo === 0) { mostrarToast("✅ Este cliente ya está al día."); return; }
-    if (!confirm(`¿Saldar toda la deuda de ${c.nombre} (${saldo.toLocaleString("es-CU")} CUP)?`)) return;
-    if (!c.abonos) c.abonos = [];
-    c.abonos.push({ id: "abono_" + Date.now(), monto: saldo, fecha: new Date().toISOString(), nota: "Saldo total" });
-    // Marcar todos los fiados como saldados
-    DB.movimientos.filter(m => m.clienteId === clienteActualId && m.tipo === "salida" && m.metodoPago === "fiado" && !m.saldado)
-        .forEach(m => m.saldado = true);
-    DB.guardar();
-    mostrarToast("✅ Deuda saldada completamente");
-    actualizarPerfilCliente();
+
+    // Fase J6-B: en vez de asumir "efectivo" en silencio, reutiliza el mismo
+    // modal y selector de método de pago que un abono parcial — cambio
+    // mínimo, un solo mecanismo de UI para ambos caminos.
+    saldandoTodoActivo = true;
+    document.getElementById("abonoClienteNombre").innerText = "Cliente: " + c.nombre + " · Saldo total a saldar: " + saldo.toLocaleString("es-CU") + " " + (DB.configuracion.moneda||"CUP");
+    document.getElementById("abonoMonto").value = saldo;
+    document.getElementById("abonoMonto").readOnly = true; // saldando todo, el monto no se edita
+    document.getElementById("abonoMetodoPago").value = "efectivo";
+    document.getElementById("abonoFecha").value = new Date().toISOString().slice(0,10);
+    document.getElementById("abonoNota").value = "Saldo total";
+    document.getElementById("modalAbono").classList.remove("oculto");
 }
 
 // ── Sheet de clientes ──
@@ -5956,15 +6752,15 @@ function actualizarReporte() {
     const moneda = DB.configuracion.moneda || "CUP";
     document.getElementById("repSubtitulo").innerText = etiqueta;
 
-    // Movimientos de salida en el rango
-    const ventas = DB.movimientos.filter(m => m.tipo === "salida" && new Date(m.fecha) >= inicio && new Date(m.fecha) <= fin);
-    let totalVentas = 0, totalCosto = 0, totalUnidades = 0;
-    ventas.forEach(m => {
-        totalVentas += (m.precioUnitario || 0) * (m.cantidad || 0);
-        totalCosto += (typeof m.costoReal === "number" ? m.costoReal : 0) * (m.cantidad || 0);
-        totalUnidades += m.cantidad || 0;
-    });
-    const gananciaBruta = totalVentas - totalCosto;
+    // Movimientos de salida en el rango — Fase K: excluye anuladas y netea
+    // devoluciones. `ventas` (sin anular) y `devoluciones` alimentan todo
+    // este reporte (cascada, métodos de pago, top productos), así que una
+    // sola definición aquí cubre todos esos widgets a la vez.
+    const netoReporte = calcularVentasNetas(inicio, fin);
+    const ventas = netoReporte.ventas;
+    const devoluciones = netoReporte.devoluciones;
+    const totalVentas = netoReporte.totalVentas, totalCosto = netoReporte.totalCosto, totalUnidades = netoReporte.unidades;
+    const gananciaBruta = netoReporte.totalGanancia;
     const gastosRango = DB.gastosEnRango(inicio, fin).reduce((s, g) => s + g.monto, 0);
     const gananciaNeta = gananciaBruta - gastosRango;
     const margen = totalVentas > 0 ? Math.round((gananciaBruta / totalVentas) * 100) : 0;
@@ -5984,10 +6780,11 @@ function actualizarReporte() {
     document.getElementById("repIndProductosVendidos").innerText = totalUnidades;
     document.getElementById("repIndClientesActivos").innerText = clientesActivos;
 
-    // Métodos de pago
+    // Métodos de pago (Fase K: resta lo devuelto del método correspondiente)
     const metodos = { efectivo:"💵 Efectivo", transfermovil:"📱 Transfermóvil", enzona:"💳 EnZona", transferencia:"🏦 Transferencia", fiado:"📦 Fiado", otros:"🧾 Otros" };
     const porMetodo = {};
     ventas.forEach(m => { const k = m.metodoPago || "otros"; porMetodo[k] = (porMetodo[k]||0) + (m.precioUnitario||0)*(m.cantidad||0); });
+    devoluciones.forEach(m => { const k = m.metodoPago || "otros"; porMetodo[k] = (porMetodo[k]||0) - (m.precioUnitario||0)*(m.cantidad||0); });
     const metEl = document.getElementById("repMetodosPago");
     const metKeys = Object.keys(porMetodo).sort((a,b) => porMetodo[b]-porMetodo[a]);
     metEl.innerHTML = metKeys.length === 0
@@ -5998,7 +6795,7 @@ function actualizarReporte() {
                 <strong style="font-family:'Syne',Arial,sans-serif;color:var(--accent);">${porMetodo[k].toLocaleString("es-CU")} ${moneda}</strong>
             </div>${i<metKeys.length-1?'<div class="cfg-row-sep"></div>':''}`).join("");
 
-    // Productos más rentables (ganancia real FIFO)
+    // Productos más rentables (ganancia real FIFO) — Fase K: resta lo devuelto
     const porProductoGanancia = {}, porProductoCantidad = {}, porProductoNombre = {};
     ventas.forEach(m => {
         const p = DB.buscarProducto(m.productoId);
@@ -6009,6 +6806,15 @@ function actualizarReporte() {
         porProductoGanancia[id] = (porProductoGanancia[id]||0) + ganancia;
         porProductoCantidad[id] = (porProductoCantidad[id]||0) + (m.cantidad||0);
         porProductoNombre[id] = nombre;
+    });
+    devoluciones.forEach(m => {
+        const p = DB.buscarProducto(m.productoId);
+        const id = m.productoId;
+        const costoUnit = typeof m.costoReal === "number" ? m.costoReal : 0;
+        const ganancia = ((m.precioUnitario||0) - costoUnit) * (m.cantidad||0);
+        porProductoGanancia[id] = (porProductoGanancia[id]||0) - ganancia;
+        porProductoCantidad[id] = (porProductoCantidad[id]||0) - (m.cantidad||0);
+        if (!porProductoNombre[id]) porProductoNombre[id] = p ? p.nombre : "Eliminado";
     });
 
     const topRentables = Object.keys(porProductoGanancia).sort((a,b) => porProductoGanancia[b]-porProductoGanancia[a]).slice(0,5);
@@ -6033,9 +6839,9 @@ function actualizarReporte() {
 
     // Productos sin movimiento
     const hoy = new Date();
-    const idsConVenta = new Set(DB.movimientos.filter(m=>m.tipo==="salida").map(m=>m.productoId));
+    const idsConVenta = new Set(DB.movimientos.filter(m=>m.tipo==="salida" && !m.anulado).map(m=>m.productoId));
     const sinMov = DB.productos.map(p => {
-        const ultMov = DB.movimientos.filter(m => m.productoId === p.id && m.tipo==="salida").sort((a,b)=>new Date(b.fecha)-new Date(a.fecha))[0];
+        const ultMov = DB.movimientos.filter(m => m.productoId === p.id && m.tipo==="salida" && !m.anulado).sort((a,b)=>new Date(b.fecha)-new Date(a.fecha))[0];
         const dias = ultMov ? Math.floor((hoy-new Date(ultMov.fecha))/(1000*60*60*24)) : null;
         return { p, dias };
     }).filter(({p,dias}) => !idsConVenta.has(p.id) || (dias !== null && dias > 15))
@@ -6068,14 +6874,13 @@ function actualizarReporte() {
     document.getElementById("repValorVenta").innerText = valorVenta.toLocaleString("es-CU") + " " + moneda;
     document.getElementById("repGananciaPotencial").innerText = (valorVenta-capital).toLocaleString("es-CU") + " " + moneda;
 
-    // Comparación mes anterior (solo en vista mes)
+    // Comparación mes anterior (solo en vista mes) — Fase K: netas
     if (vistaReporteActual === "mes") {
         const iniAnt = new Date(); iniAnt.setMonth(iniAnt.getMonth()-1); iniAnt.setDate(1); iniAnt.setHours(0,0,0,0);
         const finAnt = new Date(); finAnt.setDate(0); finAnt.setHours(23,59,59,999);
-        const ventasAnt = DB.movimientos.filter(m=>m.tipo==="salida"&&new Date(m.fecha)>=iniAnt&&new Date(m.fecha)<=finAnt);
-        const totalVentasAnt = ventasAnt.reduce((s,m)=>s+(m.precioUnitario||0)*(m.cantidad||0),0);
-        const costoAnt = ventasAnt.reduce((s,m)=>s+(typeof m.costoReal==="number"?m.costoReal:0)*(m.cantidad||0),0);
-        const gananciaAnt = totalVentasAnt - costoAnt;
+        const netoAnt = calcularVentasNetas(iniAnt, finAnt);
+        const totalVentasAnt = netoAnt.totalVentas;
+        const gananciaAnt = netoAnt.totalGanancia;
         const variacion = totalVentasAnt > 0 ? Math.round(((totalVentas-totalVentasAnt)/totalVentasAnt)*100) : null;
         document.getElementById("repVentasAnterior").innerText = totalVentasAnt.toLocaleString("es-CU") + " " + moneda;
         document.getElementById("repGananciaAnterior").innerText = gananciaAnt.toLocaleString("es-CU") + " " + moneda;
@@ -6312,9 +7117,7 @@ function calcularTributos(ingresosMes, gastosMes, mes, anio) {
     // Calculamos el estimado acumulado del año
     const iniAnio = new Date(anio, 0, 1);
     const finAnio = new Date(anio, mes + 1, 0, 23, 59, 59);
-    const ingresosAnio = DB.movimientos
-        .filter(m => m.tipo === "salida" && new Date(m.fecha) >= iniAnio && new Date(m.fecha) <= finAnio)
-        .reduce((s, m) => s + (m.precioUnitario || 0) * (m.cantidad || 0), 0);
+    const ingresosAnio = calcularVentasNetas(iniAnio, finAnio).totalVentas;
     const gastosAnio = DB.gastosEnRango(iniAnio, finAnio).reduce((s, g) => s + g.monto, 0);
     const baseAnual = Math.max(0, ingresosAnio - cfg.minExentoAnual - gastosAnio);
     // Escala progresiva simplificada del impuesto anual (legislación cubana TCP)
@@ -6360,12 +7163,13 @@ function calcularTributos(ingresosMes, gastosMes, mes, anio) {
 }
 
 // Obtiene ingresos del mes actual de la app
+// Fase K: ingresos declarables para ONAT también deben excluir ventas
+// anuladas y descontar devoluciones — de lo contrario el negocio pagaría
+// impuesto sobre dinero que nunca recibió o que ya devolvió.
 function ingresosDelMes(mes, anio) {
     const inicio = new Date(anio, mes, 1);
     const fin = new Date(anio, mes + 1, 0, 23, 59, 59);
-    return DB.movimientos
-        .filter(m => m.tipo === "salida" && new Date(m.fecha) >= inicio && new Date(m.fecha) <= fin)
-        .reduce((s, m) => s + (m.precioUnitario || 0) * (m.cantidad || 0), 0);
+    return calcularVentasNetas(inicio, fin).totalVentas;
 }
 
 function gastosDelMes(mes, anio) {
@@ -6414,7 +7218,7 @@ function renderONATPanel() {
 
     // Verificación automática
     const alertasVerif = [];
-    const sinMetodoPago = DB.movimientos.filter(m => m.tipo === "salida" && !m.metodoPago);
+    const sinMetodoPago = DB.movimientos.filter(m => m.tipo === "salida" && !m.anulado && !m.metodoPago);
     if (sinMetodoPago.length > 0) alertasVerif.push(`⚠️ ${sinMetodoPago.length} movimiento${sinMetodoPago.length>1?'s':''} sin método de pago`);
     const sinCosto = DB.productos.filter(p => !p.compra || p.compra === 0);
     if (sinCosto.length > 0) alertasVerif.push(`⚠️ ${sinCosto.length} producto${sinCosto.length>1?'s':''} sin costo registrado`);
@@ -7093,7 +7897,7 @@ function calcularMasVendidosPOS(limite) {
     if (acceso.modo === "bloqueado") return [];
     const conteo = {};
     DB.movimientos.forEach(m => {
-        if (m.tipo !== "salida") return;
+        if (m.tipo !== "salida" || m.anulado) return;
         conteo[m.productoId] = (conteo[m.productoId] || 0) + (m.cantidad || 0);
     });
     let resultado = Object.entries(conteo)
@@ -7112,7 +7916,7 @@ function calcularRecientesPOS(limite) {
     const vistos = new Set();
     const resultado = [];
     [...DB.movimientos]
-        .filter(m => m.tipo === "salida")
+        .filter(m => m.tipo === "salida" && !m.anulado)
         .sort((a, b) => new Date(b.fecha) - new Date(a.fecha))
         .forEach(m => {
             if (vistos.has(m.productoId) || resultado.length >= limite) return;
@@ -7832,6 +8636,10 @@ function ejecutarVentaPOS() {
             cliente: cli ? cli.nombre : "",
             clienteId,
             sesionCajaId: DB.caja.sesionActiva || null,
+            // Fase K: quién hizo la venta, para mostrarlo en el detalle de
+            // factura. Sólo se conoce cuando hay sesión de usuario activa
+            // (usuarioActual !== null); en modo compatibilidad queda null.
+            usuarioId: usuarioActual ? usuarioActual.id : null,
             nota: `Venta POS${item.descuento > 0 ? ` (desc. ${item.descuentoTipo === "monto" ? item.descuento + " " + moneda : item.descuento + "%"})` : ""}${posDescGlobalValor > 0 ? ` (desc. global ${posDescGlobalTipo === "monto" ? posDescGlobalValor + " " + moneda : posDescGlobalValor + "%"})` : ""}`,
             fecha: fechaVenta
         });
@@ -7975,11 +8783,14 @@ function renderCierreCaja() {
 
     document.getElementById("cierreFecha").innerText = fecha.toLocaleDateString("es-CU", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 
-    const ventasHoy = DB.movimientos.filter(m =>
-        m.tipo === "salida" && new Date(m.fecha) >= inicio && new Date(m.fecha) <= fin
-    );
+    // Fase K: excluye anuladas y neteas devoluciones del día, incluido el
+    // desglose por método de pago (igual criterio que resumenSesion()).
+    const ventasHoy = movimientosVentaEnRango(inicio, fin);
+    const devolucionesHoy = movimientosDevolucionEnRango(inicio, fin);
 
-    const totalVentas = ventasHoy.reduce((s, m) => s + (m.precioUnitario||0)*(m.cantidad||0), 0);
+    const totalVentasBrutas = ventasHoy.reduce((s, m) => s + (m.precioUnitario||0)*(m.cantidad||0), 0);
+    const totalDevuelto = devolucionesHoy.reduce((s, m) => s + (m.precioUnitario||0)*(m.cantidad||0), 0);
+    const totalVentas = totalVentasBrutas - totalDevuelto;
 
     // Desglose por método — mixto usa los montos guardados
     let efectivoTotal = 0, transferenciaTotal = 0, fiadoTotal = 0;
@@ -7997,21 +8808,30 @@ function renderCierreCaja() {
             transferenciaTotal += m.montoTransferencia || 0;
         }
     });
-    const unidades = ventasHoy.reduce((s, m) => s + (m.cantidad||0), 0);
-    const costo = ventasHoy.reduce((s, m) => s + (typeof m.costoReal==="number" ? m.costoReal : 0)*(m.cantidad||0), 0);
+    devolucionesHoy.forEach(m => {
+        const monto = (m.precioUnitario||0)*(m.cantidad||0);
+        if (m.metodoPago === "efectivo") efectivoTotal -= monto;
+        else if (m.metodoPago === "transferencia") transferenciaTotal -= monto;
+        else if (m.metodoPago === "fiado") fiadoTotal -= monto;
+    });
+    const unidades = ventasHoy.reduce((s, m) => s + (m.cantidad||0), 0) - devolucionesHoy.reduce((s, m) => s + (m.cantidad||0), 0);
+    const costo = ventasHoy.reduce((s, m) => s + (typeof m.costoReal==="number" ? m.costoReal : 0)*(m.cantidad||0), 0)
+        - devolucionesHoy.reduce((s, m) => s + (typeof m.costoReal==="number" ? m.costoReal : 0)*(m.cantidad||0), 0);
     const ganancia = totalVentas - costo;
 
     document.getElementById("cierreTotalVentas").innerText = totalVentas.toLocaleString("es-CU") + " " + moneda;
     document.getElementById("cierreEfectivo").innerText = efectivoTotal.toLocaleString("es-CU") + " " + moneda;
     document.getElementById("cierreTransferencia").innerText = transferenciaTotal.toLocaleString("es-CU") + " " + moneda;
     document.getElementById("cierreFiado").innerText = fiadoTotal.toLocaleString("es-CU") + " " + moneda;
+    const elDevol = document.getElementById("cierreDevoluciones");
+    if (elDevol) elDevol.innerText = totalDevuelto.toLocaleString("es-CU") + " " + moneda;
     document.getElementById("cierreTransacciones").innerText = ventasHoy.length;
     document.getElementById("cierreUnidades").innerText = unidades;
     document.getElementById("cierreIngresos").innerText = totalVentas.toLocaleString("es-CU") + " " + moneda;
     document.getElementById("cierreCosto").innerText = costo.toLocaleString("es-CU") + " " + moneda;
     document.getElementById("cierreGanancia").innerText = ganancia.toLocaleString("es-CU") + " " + moneda;
 
-    // Top productos del día
+    // Top productos del día (Fase K: neteado contra devoluciones del mismo producto)
     const porProducto = {};
     ventasHoy.forEach(m => {
         const p = DB.buscarProducto(m.productoId);
@@ -8019,6 +8839,12 @@ function renderCierreCaja() {
         if (!porProducto[p.id]) porProducto[p.id] = { nombre: p.nombre, cantidad: 0, total: 0 };
         porProducto[p.id].cantidad += m.cantidad || 0;
         porProducto[p.id].total += (m.precioUnitario||0)*(m.cantidad||0);
+    });
+    devolucionesHoy.forEach(m => {
+        const p = DB.buscarProducto(m.productoId);
+        if (!p || !porProducto[p.id]) return;
+        porProducto[p.id].cantidad -= m.cantidad || 0;
+        porProducto[p.id].total -= (m.precioUnitario||0)*(m.cantidad||0);
     });
     const top = Object.values(porProducto).sort((a,b) => b.total-a.total).slice(0,5);
     const topEl = document.getElementById("cierreTopProductos");

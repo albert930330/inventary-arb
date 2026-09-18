@@ -387,6 +387,66 @@
 </div>
 
 <!-- ═══════════════════════════════════════════════ -->
+<!-- PANTALLA: DETALLE DE FACTURA (Fase K)          -->
+<!-- ═══════════════════════════════════════════════ -->
+<div id="pantallaDetalleFactura" class="pantalla">
+  <div class="header">
+    <button class="btn-back" onclick="volverDesdeDetalleFactura()">‹</button>
+    <div class="header-left"><h1 id="dfacTitulo">Factura</h1><p id="dfacSub">—</p></div>
+  </div>
+  <div style="padding:14px 20px 4px;">
+    <div id="dfacEstadoBadge" class="dfac-estado-badge">—</div>
+  </div>
+  <div class="cfg-grupo-label" style="padding-top:10px;">DATOS DE LA VENTA</div>
+  <div class="cfg-grupo" style="margin:0 20px 14px;" id="dfacDatos"></div>
+
+  <div class="cfg-grupo-label">PRODUCTOS</div>
+  <div id="dfacProductos" style="margin:0 20px 14px; display:flex; flex-direction:column; gap:8px;"></div>
+
+  <div class="dashfin-cascada" style="margin:0 20px 14px;">
+    <div class="dashfin-row dashfin-total"><span>Total</span><strong id="dfacTotal">0 CUP</strong></div>
+  </div>
+
+  <div id="dfacAcciones" style="padding:0 20px 40px; display:flex; flex-direction:column; gap:10px;"></div>
+</div>
+
+<!-- MODAL: ANULAR VENTA -->
+<div id="modalAnularVenta" class="modal oculto">
+<div class="modal-contenido">
+  <div class="modal-header">
+    <h2>❌ Anular Venta</h2>
+    <button class="btn-cerrar" onclick="cerrarModalAnularVenta()">✕</button>
+  </div>
+  <p style="font-size:13px;color:var(--text2);line-height:1.5;margin-bottom:6px;">Esta acción devolverá el stock al inventario y marcará la factura como anulada. La venta original permanece en el historial. Esta acción no se puede deshacer.</p>
+  <label>Motivo de la anulación *</label>
+  <textarea id="anularVentaMotivo" placeholder="Ej: Error al cobrar, producto equivocado..."></textarea>
+  <button id="btnConfirmarAnularVenta" onclick="confirmarAnularVenta()">❌ Confirmar Anulación</button>
+</div>
+</div>
+
+<!-- MODAL: DEVOLUCIÓN -->
+<div id="modalDevolucion" class="modal oculto">
+<div class="modal-contenido">
+  <div class="modal-header">
+    <h2>↩️ Registrar Devolución</h2>
+    <button class="btn-cerrar" onclick="cerrarModalDevolucion()">✕</button>
+  </div>
+  <p style="font-size:13px;color:var(--text2);line-height:1.5;margin-bottom:6px;">Indica cuántas unidades de cada producto devuelve el cliente. Puedes devolver solo una parte.</p>
+  <div id="devolucionLineas" style="display:flex; flex-direction:column; gap:12px; margin-top:10px;"></div>
+  <div id="devolucionMetodoReembolsoWrap" class="oculto">
+    <label>¿Cómo se devuelve el dinero?</label>
+    <select id="devolucionMetodoReembolso">
+      <option value="efectivo">💵 Efectivo</option>
+      <option value="transferencia">📱 Transferencia</option>
+    </select>
+  </div>
+  <label>Motivo (opcional)</label>
+  <input type="text" id="devolucionMotivo" placeholder="Ej: Producto dañado, cliente cambió de opinión...">
+  <button id="btnConfirmarDevolucion" onclick="confirmarDevolucion()">↩️ Confirmar Devolución</button>
+</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════ -->
 <!-- PANTALLA: LISTA DE ALMACENES                   -->
 <!-- ═══════════════════════════════════════════════ -->
 <div id="pantallaAlmacenes" class="pantalla">
@@ -809,6 +869,7 @@
     <div class="dashfin-row"><span>Ventas en efectivo</span><strong id="cierreEfectivo">0 CUP</strong></div>
     <div class="dashfin-row"><span>Transfermóvil / EnZona</span><strong id="cierreTransferencia">0 CUP</strong></div>
     <div class="dashfin-row"><span>Fiado (por cobrar)</span><strong id="cierreFiado" style="color:var(--warn);">0 CUP</strong></div>
+    <div class="dashfin-row"><span>↩️ Devoluciones</span><strong id="cierreDevoluciones" style="color:var(--warn);">0 CUP</strong></div>
     <div class="dashfin-sep"></div>
     <div class="dashfin-row dashfin-subtotal"><span>Transacciones</span><strong id="cierreTransacciones">0</strong></div>
     <div class="dashfin-row dashfin-subtotal"><span>Unidades vendidas</span><strong id="cierreUnidades">0</strong></div>
@@ -1378,6 +1439,11 @@
   <div id="abonoClienteNombre" style="font-size:14px;color:var(--text2);margin-bottom:12px;"></div>
   <label>Monto del abono *</label>
   <input type="number" id="abonoMonto" placeholder="0.00" min="0">
+  <label>Método de pago</label>
+  <select id="abonoMetodoPago">
+    <option value="efectivo">💵 Efectivo</option>
+    <option value="transferencia">📲 Transferencia</option>
+  </select>
   <label>Fecha</label>
   <input type="date" id="abonoFecha">
   <label>Nota (opcional)</label>
@@ -2841,6 +2907,7 @@
       <div class="sc-stat-item sc-stat-warn"><span>💸 Gastos</span><strong id="scGastos">0</strong></div>
     </div>
     <div class="sc-stat-item sc-stat-warn sc-stat-full"><span>🏦 Retiros de caja</span><strong id="scRetiros">0</strong></div>
+    <div class="sc-stat-item sc-stat-warn sc-stat-full"><span>↩️ Devoluciones</span><strong id="scDevoluciones">0</strong></div>
 
     <div class="sa-grid" style="grid-template-columns:1fr 1fr;">
       <button class="sa-btn sa-btn-red" onclick="abrirModalMovimientoCaja('gasto')"><span class="sa-btn-icon">💸</span><span>Salida de efectivo</span></button>
