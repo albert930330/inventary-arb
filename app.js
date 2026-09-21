@@ -6645,9 +6645,15 @@ function seleccionarClienteFiado(id) {
             mostrarToast(`⚠️ ${c.nombre} está cerca de su límite de crédito`);
         }
     }
-    // Detectar si viene del POS o de Movimientos
-    const enPOS = !document.getElementById("pantallaCajaPOS").classList.contains("oculto") ||
-                  document.getElementById("pantallaCajaPOS").classList.contains("activa");
+    // Detectar si viene del POS o de Movimientos.
+    // Las pantallas (.pantalla) se muestran/ocultan solo con la clase
+    // "activa" (display:none/block por CSS) — nunca reciben la clase
+    // "oculto" (esa es para modales/sheets/subcampos). El chequeo anterior
+    // (!contains("oculto") || contains("activa")) daba SIEMPRE true,
+    // porque pantallaCajaPOS jamás tiene "oculto", así que la selección de
+    // cliente desde Movimientos se guardaba por error en los campos del
+    // POS y el selector de Movimientos se quedaba sin marcar visualmente.
+    const enPOS = document.getElementById("pantallaCajaPOS").classList.contains("activa");
     if (enPOS) {
         document.getElementById("posClienteId").value = id;
         const textoEl = document.getElementById("textoClientePOS");
@@ -6666,10 +6672,15 @@ function seleccionarClienteFiado(id) {
 function actualizarCampoFiado() {
     const metodo = document.getElementById("movMetodoPago").value;
     const campo = document.getElementById("campoFiado");
+    const campoTexto = document.getElementById("campoClienteTexto");
     if (metodo === "fiado") {
         campo.classList.remove("oculto");
+        // En fiado el cliente se elige con el selector de arriba (obligatorio);
+        // el campo de texto libre solo aplica a los demás métodos de pago.
+        if (campoTexto) campoTexto.classList.add("oculto");
     } else {
         campo.classList.add("oculto");
+        if (campoTexto) campoTexto.classList.remove("oculto");
         document.getElementById("movClienteId").value = "";
         document.getElementById("textoClienteSel").className = "texto-prod-placeholder";
         document.getElementById("textoClienteSel").innerText = "Toca para seleccionar cliente...";
