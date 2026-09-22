@@ -2,6 +2,40 @@
 // INVENTARY ARB
 // ═══════════════════════════════════════════════
 const DB = {
+    // ── Generador centralizado de IDs (Fase 2 — auditoría) ──
+    // Antes, cada tipo de registro generaba su id como "prefijo_" + Date.now(),
+    // que tiene resolución de 1ms: si dos registros se creaban en el mismo
+    // milisegundo (ej. importar varios productos por CSV en un forEach
+    // síncrono, o una venta POS con varias líneas registrando varios
+    // movimientos seguidos), podían terminar con el MISMO id, y funciones
+    // como buscarProducto/buscarLineasFactura resuelven siempre al primero
+    // que coincide — pudiendo editar/vender/devolver el registro equivocado.
+    //
+    // Esta función centraliza la generación: conserva el prefijo de cada
+    // tipo de registro (compatibilidad total con ids ya guardados, que
+    // nunca se tocan) y arma el id con tres partes que juntas hacen la
+    // colisión prácticamente imposible incluso dentro del mismo bucle
+    // síncrono:
+    //   1) Date.now()            → sigue dando contexto temporal legible
+    //   2) un contador interno   → aumenta en cada llamada de esta sesión,
+    //                              así que dos llamadas seguidas NUNCA dan
+    //                              el mismo valor aunque Date.now() se repita
+    //   3) un sufijo aleatorio   → protege además contra el caso, ya de por
+    //                              sí casi imposible, de que dos pestañas/
+    //                              sesiones distintas generen ids en el
+    //                              mismo instante con el contador igual
+    // Las búsquedas por id existentes (comparación de string con ===)
+    // siguen funcionando exactamente igual, tanto para ids viejos como
+    // para los nuevos, porque el formato del id nunca importó, solo que
+    // sea único.
+    _contadorId: 0,
+    generarId(prefijo) {
+        this._contadorId = (this._contadorId + 1) % 1679616; // se reinicia cada 36^4 llamadas, solo para no crecer sin límite
+        const contador = this._contadorId.toString(36);
+        const azar = Math.random().toString(36).slice(2, 6);
+        return `${prefijo}_${Date.now()}_${contador}${azar}`;
+    },
+
     // Lee y parsea una clave de localStorage de forma segura. Si el JSON
     // está corrupto (por ejemplo, la app se cerró a mitad de una
     // escritura), en vez de que toda la app deje de cargar, se guarda
@@ -125,14 +159,14 @@ const DB = {
         administrador: ["ver_dashboard","ver_inventario","crear_producto","editar_producto","eliminar_producto",
             "registrar_entrada","ajustar_inventario","transferir_mercancia","recibir_transferencia",
             "vender","vender_fiado","aplicar_descuento","anular_venta","devolucion",
-            "abrir_caja","cerrar_caja","retiro_caja","consultar_caja",
+            "abrir_caja","cerrar_caja","retiro_caja","registrar_gasto_caja","consultar_caja",
             "ver_clientes","editar_clientes","registrar_abono","ver_proveedores","editar_proveedores","registrar_gastos",
             "ver_reportes","ver_estadisticas","gestionar_usuarios","gestionar_roles","gestionar_tiendas",
             "gestionar_cajas","configuracion","onat","respaldos","editar_movimientos"],
         encargado: ["ver_dashboard","ver_inventario","crear_producto","editar_producto",
             "registrar_entrada","ajustar_inventario","transferir_mercancia","recibir_transferencia",
             "vender","vender_fiado","aplicar_descuento","devolucion",
-            "abrir_caja","cerrar_caja","retiro_caja","consultar_caja",
+            "abrir_caja","cerrar_caja","retiro_caja","registrar_gasto_caja","consultar_caja",
             "ver_clientes","editar_clientes","registrar_abono","ver_proveedores","editar_proveedores","registrar_gastos",
             "ver_reportes","ver_estadisticas"],
         cajero: ["ver_dashboard","ver_inventario","vender","vender_fiado","abrir_caja","cerrar_caja",
@@ -306,7 +340,7 @@ const DB = {
     },
 
     agregarProducto(producto) {
-        producto.id = "prod_" + Date.now();
+        producto.id = this.generarId("prod");
         producto.fechaCreacion = new Date().toISOString();
         this.productos.push(producto);
         this.guardar();
@@ -323,7 +357,7 @@ const DB = {
     buscarPorCodigo(codigo) { return this.productos.find(p => p.codigoBarras === codigo); },
 
     registrarMovimiento(tipo, productoId, datos) {
-        const mov = { id: "mov_" + Date.now(), tipo, productoId, fecha: new Date().toISOString(), ...datos };
+        const mov = { id: this.generarId("mov"), tipo, productoId, fecha: new Date().toISOString(), ...datos };
         this.movimientos.push(mov);
         this.guardar();
         return mov;
@@ -369,7 +403,7 @@ const DB = {
         const p = this.buscarProducto(productoId);
         if (!p || !p.usaFifo) return;
         if (!p.lotes) p.lotes = [];
-        p.lotes.push({ id: "lote_" + Date.now(), cantidad, costo, fecha: new Date().toISOString() });
+        p.lotes.push({ id: this.generarId("lote"), cantidad, costo, fecha: new Date().toISOString() });
         this.sincronizarLotes(p);
         this.guardar();
     },
@@ -410,7 +444,7 @@ const DB = {
         const p = this.buscarProducto(productoId);
         if (!p || !p.usaFifo) return;
         if (!p.lotes) p.lotes = [];
-        p.lotes.unshift({ id: "lote_" + Date.now(), cantidad, costo, fecha: new Date().toISOString() });
+        p.lotes.unshift({ id: this.generarId("lote"), cantidad, costo, fecha: new Date().toISOString() });
         this.sincronizarLotes(p);
         this.guardar();
     },
@@ -418,7 +452,7 @@ const DB = {
     // ── CAJA (sesiones) ──
     abrirCaja(fondoInicial, responsable, contexto = {}) {
         const sesion = {
-            id: "caja_" + Date.now(),
+            id: this.generarId("caja"),
             fechaApertura: new Date().toISOString(),
             fechaCierre: null,
             responsable: responsable || "",
@@ -449,7 +483,7 @@ const DB = {
     agregarMovimientoCaja(tipo, monto, concepto, extra = {}) {
         const sesion = this.sesionCajaActiva();
         if (!sesion) return null;
-        const mov = { id: "movcaja_" + Date.now(), tipo, monto: Number(monto) || 0, concepto, fecha: new Date().toISOString(), ...extra };
+        const mov = { id: this.generarId("movcaja"), tipo, monto: Number(monto) || 0, concepto, fecha: new Date().toISOString(), ...extra };
         sesion.movimientosCaja.push(mov);
         this.guardar();
         return mov;
@@ -544,7 +578,7 @@ const DB = {
 
     // ── GASTOS ──
     agregarGasto(gasto) {
-        gasto.id = "gasto_" + Date.now();
+        gasto.id = this.generarId("gasto");
         gasto.fechaCreacion = new Date().toISOString();
         this.gastos.push(gasto);
         this.guardar();
@@ -572,7 +606,7 @@ const DB = {
 
     // ── CLIENTES ──
     agregarCliente(datos) {
-        const cliente = { ...datos, id: "cli_" + Date.now(), fechaCreacion: new Date().toISOString(), abonos: [] };
+        const cliente = { ...datos, id: this.generarId("cli"), fechaCreacion: new Date().toISOString(), abonos: [] };
         this.clientes.push(cliente);
         this.guardar();
         return cliente;
@@ -591,7 +625,7 @@ const DB = {
     buscarCliente(id) { return this.clientes.find(c => c.id === id); },
 
     agregarProveedor(datos) {
-        const p = { ...datos, id: "prov_" + Date.now(), fechaCreacion: new Date().toISOString() };
+        const p = { ...datos, id: this.generarId("prov"), fechaCreacion: new Date().toISOString() };
         this.proveedores.push(p); this.guardar(); return p;
     },
     actualizarProveedor(id, datos) {
@@ -930,6 +964,7 @@ const CATALOGO_PERMISOS = {
         ["abrir_caja", "Abrir caja"],
         ["cerrar_caja", "Cerrar caja"],
         ["retiro_caja", "Retirar dinero de caja"],
+        ["registrar_gasto_caja", "Pagar gastos directamente desde caja"],
         ["consultar_caja", "Consultar estado de caja"]
     ],
     "Clientes y proveedores": [
@@ -986,7 +1021,7 @@ function agregarRol({ nombre, permisos = [] }) {
     const validos = listaPermisosValidos();
     const permisosLimpios = [...new Set(permisos)].filter(p => validos.includes(p));
     const rol = {
-        id: "rol_" + Date.now(),
+        id: DB.generarId("rol"),
         nombre: nombre.trim(),
         clave: null, // null = rol personalizado (no es uno de los 4 base)
         permisos: permisosLimpios,
@@ -1694,11 +1729,18 @@ let movCajaTipoActual = "gasto";
 
 function abrirModalMovimientoCaja(tipo) {
     if (!DB.sesionCajaActiva()) { alert("⚠️ No hay una caja abierta."); return; }
-    // Fase I: retiro_caja protege exclusivamente los retiros. Los gastos
-    // (tipo === "gasto") se dejan sin tocar hasta auditar el módulo Gastos.
+    // Fase 4A (auditoría Caja+Gastos): "gasto" aquí es un pago físico desde
+    // el cajón (distinto de DB.gastos, que sigue sin tocarse en esta fase),
+    // así que se protege con su propio permiso (registrar_gasto_caja) en
+    // vez de con retiro_caja, para no mezclar "sacar dinero para el banco"
+    // con "pagar un gasto con el efectivo de caja" — son operaciones
+    // físicamente distintas aunque ambas muevan efectivo del cajón.
     if (tipo === "retiro") {
         const acceso = resolverAccesoCaja("retiro_caja");
         if (acceso.modo === "bloqueado") { alert(`⛔ No puedes hacer retiros de caja:\n\n${acceso.motivo}`); return; }
+    } else if (tipo === "gasto") {
+        const acceso = resolverAccesoCaja("registrar_gasto_caja");
+        if (acceso.modo === "bloqueado") { alert(`⛔ No puedes registrar salidas de efectivo:\n\n${acceso.motivo}`); return; }
     }
     cerrarSheetSesionCaja(); // el sheet tiene z-index mayor que el modal; hay que ocultarlo para que el modal quede al frente
     movCajaTipoActual = tipo;
@@ -1718,10 +1760,14 @@ function cerrarModalMovimientoCaja() {
 
 function confirmarMovimientoCaja() {
     if (!DB.sesionCajaActiva()) { alert("⚠️ No hay una caja abierta."); cerrarModalMovimientoCaja(); return; }
-    // Fase I: revalidar justo antes de escribir, exclusivamente para retiros.
+    // Fase 4A: revalidar justo antes de escribir, para retiros y para
+    // salidas de efectivo (gasto de caja), cada una con su propio permiso.
     if (movCajaTipoActual === "retiro") {
         const acceso = resolverAccesoCaja("retiro_caja");
         if (acceso.modo === "bloqueado") { alert(`⛔ No se puede registrar el retiro:\n\n${acceso.motivo}`); cerrarModalMovimientoCaja(); return; }
+    } else if (movCajaTipoActual === "gasto") {
+        const acceso = resolverAccesoCaja("registrar_gasto_caja");
+        if (acceso.modo === "bloqueado") { alert(`⛔ No se puede registrar la salida de efectivo:\n\n${acceso.motivo}`); cerrarModalMovimientoCaja(); return; }
     }
     const concepto = document.getElementById("movCajaConcepto").value.trim();
     const monto = Number(document.getElementById("movCajaMonto").value);
@@ -2632,7 +2678,7 @@ function buscarDuplicadosProducto(nombre, almacenExcluir) {
 function procederCrearProductoNuevo(producto) {
     producto.usaFifo = true;
     producto.lotes = [{
-        id: "lote_" + Date.now(),
+        id: DB.generarId("lote"),
         cantidad: producto.cantidad,
         costo: producto.compra,
         fecha: new Date().toISOString()
@@ -2737,7 +2783,7 @@ document.getElementById("guardarProducto").addEventListener("click", async () =>
     if (fotoEliminar) {
         producto.fotoId = null;
     } else if (fotoTempBlob) {
-        const nuevoFotoId = "foto_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
+        const nuevoFotoId = DB.generarId("foto");
         try {
             await FotoDB.guardar(nuevoFotoId, fotoTempBlob);
         } catch (err) {
@@ -4503,10 +4549,11 @@ function resolverAccesoEdicionMovimiento(mov) {
 // pasa por contextoPuedeOperar(permiso); si el contexto es inválido, se
 // bloquea — nunca cae al modo compatibilidad.
 //
-// IMPORTANTE (a propósito, no es un olvido): "retiro_caja" protege
-// exclusivamente los retiros, NO los gastos. Son conceptos contables
-// distintos y el módulo Gastos todavía no se ha auditado — se deja para
-// una fase futura, tal como se acordó.
+// IMPORTANTE: "retiro_caja" protege exclusivamente los retiros; las
+// salidas de efectivo (gasto de caja) se protegen aparte con
+// "registrar_gasto_caja" (Fase 4A) — son conceptos contables distintos
+// aunque ambos muevan efectivo físico del cajón. DB.gastos (el módulo
+// Gastos contable/fiscal) sigue completamente aparte y no se toca aquí.
 function resolverAccesoCaja(permiso) {
     if (usuarioActual === null) {
         return { modo: "legacy", contexto: null, motivo: null };
@@ -4812,7 +4859,7 @@ function guardarTienda() {
         t.nombre = nombre; t.descripcion = descripcion; t.almacenId = almacenId; t.activa = activa;
     } else {
         DB.tiendas.push({
-            id: "tienda_" + Date.now(), nombre, descripcion, almacenId, activa,
+            id: DB.generarId("tienda"), nombre, descripcion, almacenId, activa,
             fechaCreacion: new Date().toISOString()
         });
     }
@@ -4893,7 +4940,7 @@ function guardarCaja() {
         c.nombre = nombre; c.tiendaId = tiendaId; c.activa = activa;
     } else {
         DB.cajas.push({
-            id: "caja_" + Date.now(), nombre, tiendaId, activa,
+            id: DB.generarId("caja"), nombre, tiendaId, activa,
             fechaCreacion: new Date().toISOString()
         });
     }
@@ -5059,7 +5106,7 @@ async function guardarUsuario() {
         u.activo = activo;
         if (pin) u.pinHash = await hashPin(pin, u.id);
     } else {
-        const nuevoId = "user_" + Date.now();
+        const nuevoId = DB.generarId("user");
         const nuevo = {
             id: nuevoId, nombre, usuario: "", pinHash: await hashPin(pin, nuevoId),
             rolId, activo, tiendaId, cajaId,
@@ -5264,7 +5311,7 @@ document.getElementById("btnGuardarAlmacen").addEventListener("click", () => {
         }
         mostrarToast("✅ Almacén actualizado");
     } else {
-        const nuevo = { id: "alm_" + Date.now(), ...datos };
+        const nuevo = { id: DB.generarId("alm"), ...datos };
         DB.almacenes.push(nuevo);
         mostrarToast("✅ Almacén creado");
     }
@@ -5437,11 +5484,36 @@ document.getElementById("btnConfirmarTransferencia").addEventListener("click", (
     const destino = DB.almacenes.find(al => al.id === destinoId);
     if (!destino) return;
 
-    // Buscar si ya existe el mismo producto (por nombre) en el almacén destino
+    // Buscar si ya existe el mismo producto (por nombre) en el almacén destino.
+    // Se guarda si YA EXISTÍA antes de esta operación (no si se acaba de crear
+    // más abajo), porque la validación de conflicto FIFO solo aplica cuando
+    // el destino ya tenía su propia configuración previa — un destino nuevo
+    // siempre hereda usaFifo del origen y nunca puede estar en conflicto.
     let productoDestino = DB.productos.find(dp => dp.nombre === p.nombre && dp.almacen === destino.nombre);
+    const productoDestinoYaExistia = !!productoDestino;
     if (!productoDestino) {
         const { id, fechaCreacion, lotes, ...datosBase } = p;
         productoDestino = DB.agregarProducto({ ...datosBase, cantidad: 0, almacen: destino.nombre, usaFifo: p.usaFifo, lotes: [] });
+    }
+
+    // Fase 3 — corrección mínima (auditoría): si el destino YA EXISTÍA con una
+    // configuración de control de inventario (FIFO/no-FIFO) distinta a la del
+    // origen, se bloquea aquí, ANTES de tocar cualquier cantidad, lote o
+    // movimiento. Sin este chequeo: FIFO→no-FIFO hace que DB.agregarLote()
+    // no agregue nada al destino (el origen ya se descontó → la cantidad
+    // desaparece), y no-FIFO→FIFO suma la cantidad al destino sin crear
+    // ningún lote (queda "fantasma" y desaparece en la próxima operación
+    // FIFO de ese producto). Se compara con !! para tratar `false` y
+    // `undefined` como el mismo estado "no-FIFO" (ej. productos importados
+    // por CSV, que no traen el campo usaFifo).
+    if (productoDestinoYaExistia && !!p.usaFifo !== !!productoDestino.usaFifo) {
+        alert(
+            `⚠️ No se puede transferir "${p.nombre}":\n\n` +
+            `En ${origen.nombre} se controla ${p.usaFifo ? "por lotes (FIFO)" : "de forma simple (sin lotes)"}, ` +
+            `pero en ${destino.nombre} ya existe ese producto controlado ${productoDestino.usaFifo ? "por lotes (FIFO)" : "de forma simple (sin lotes)"}.\n\n` +
+            `Primero hay que unificar esa configuración entre ambos almacenes antes de poder transferirlo.`
+        );
+        return;
     }
 
     if (p.usaFifo) {
@@ -5460,6 +5532,7 @@ document.getElementById("btnConfirmarTransferencia").addEventListener("click", (
         cantidad, origen: origen.nombre, destino: destino.nombre,
         nota: nota || `${origen.nombre} → ${destino.nombre}`
     });
+
 
     mostrarToast(`✅ ${cantidad} ${p.unidad||"unidades"} transferidas a ${destino.nombre}`);
     cerrarModalTransferencia();
@@ -6498,7 +6571,7 @@ function registrarAbono(clienteId, monto, fecha, nota, metodoPago) {
         contexto = ctx;
     }
 
-    const abonoId = "abono_" + Date.now();
+    const abonoId = DB.generarId("abono");
     const fechaISO = new Date(fecha).toISOString();
 
     if (!c.abonos) c.abonos = [];
@@ -6507,7 +6580,7 @@ function registrarAbono(clienteId, monto, fecha, nota, metodoPago) {
     if (contexto) {
         const sesion = DB.sesionCajaActiva();
         sesion.movimientosCaja.push({
-            id: "mcaja_" + Date.now(),
+            id: DB.generarId("mcaja"),
             tipo: "abono",
             abonoId,
             clienteId,
