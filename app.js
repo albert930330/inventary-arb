@@ -160,17 +160,17 @@ const DB = {
             "registrar_entrada","ajustar_inventario","transferir_mercancia","recibir_transferencia",
             "vender","vender_fiado","aplicar_descuento","anular_venta","devolucion",
             "abrir_caja","cerrar_caja","retiro_caja","registrar_gasto_caja","consultar_caja",
-            "ver_clientes","editar_clientes","registrar_abono","ver_proveedores","editar_proveedores","registrar_gastos",
+            "ver_clientes","ver_fiados","editar_clientes","registrar_abono","ver_proveedores","editar_proveedores","registrar_gastos",
             "ver_reportes","ver_estadisticas","gestionar_usuarios","gestionar_roles","gestionar_tiendas",
-            "gestionar_cajas","configuracion","onat","respaldos","editar_movimientos"],
+            "gestionar_cajas","configuracion","onat","respaldos","editar_movimientos","borrar_datos"],
         encargado: ["ver_dashboard","ver_inventario","crear_producto","editar_producto",
             "registrar_entrada","ajustar_inventario","transferir_mercancia","recibir_transferencia",
             "vender","vender_fiado","aplicar_descuento","devolucion",
             "abrir_caja","cerrar_caja","retiro_caja","registrar_gasto_caja","consultar_caja",
-            "ver_clientes","editar_clientes","registrar_abono","ver_proveedores","editar_proveedores","registrar_gastos",
+            "ver_clientes","ver_fiados","editar_clientes","registrar_abono","ver_proveedores","editar_proveedores","registrar_gastos",
             "ver_reportes","ver_estadisticas"],
         cajero: ["ver_dashboard","ver_inventario","vender","vender_fiado","abrir_caja","cerrar_caja",
-            "consultar_caja","ver_clientes","editar_clientes","registrar_abono"],
+            "consultar_caja","ver_clientes","ver_fiados","editar_clientes","registrar_abono"],
         almacenero: ["ver_dashboard","ver_inventario","registrar_entrada","ajustar_inventario",
             "transferir_mercancia","recibir_transferencia"]
     },
@@ -226,6 +226,45 @@ const DB = {
         const rolAdminJ7 = this.roles.find(r => r.id === "rol_admin");
         if (rolAdminJ7 && Array.isArray(rolAdminJ7.permisos) && !rolAdminJ7.permisos.includes("editar_movimientos")) {
             rolAdminJ7.permisos.push("editar_movimientos");
+        }
+
+        // 3.6) Fase J6-C — permiso ver_fiados (lo exigía cambiarTabCliente()
+        // desde J6-B, pero nunca se había definido en el catálogo ni en los
+        // roles, así que bloqueaba a todos los usuarios identificados).
+        // Reglas de seguridad:
+        //  - Se ejecuta UNA sola vez (marca configuracion.migracionVerFiados
+        //    === true; si falta o está corrupta, la pasada es solo aditiva y
+        //    luego se fija en true). Así, si el negocio quita ver_fiados a un
+        //    rol desde Roles y permisos, no se le vuelve a poner al recargar.
+        //  - Solo toca los 3 roles base por su campo "clave" (administrador,
+        //    encargado, cajero), NUNCA por nombre visible ni por id: un rol
+        //    personalizado llamado "Cajero" tiene clave null y no se toca.
+        //  - Solo AGREGA el permiso si falta. Nunca quita ni reordena otros.
+        //  - Almacenero no lo recibe. ver_fiados no concede registrar_abono,
+        //    editar_clientes ni editar_movimientos (son permisos aparte).
+        if (this.configuracion && typeof this.configuracion === "object" && this.configuracion.migracionVerFiados !== true) {
+            const clavesVerFiados = ["administrador", "encargado", "cajero"];
+            this.roles.forEach(r => {
+                if (r && clavesVerFiados.includes(r.clave) && Array.isArray(r.permisos) && !r.permisos.includes("ver_fiados")) {
+                    r.permisos.push("ver_fiados");
+                }
+            });
+            this.configuracion.migracionVerFiados = true;
+        }
+
+        // 3.7) Fase J8-A — permiso borrar_datos. Mismas reglas que 3.6: una
+        // sola vez (marca migracionBorrarDatos === true), solo el rol base
+        // con clave "administrador" (nunca por nombre), solo agrega. Ni
+        // Encargado, ni Cajero, ni Almacenero, ni roles personalizados lo
+        // reciben; se asigna a mano desde Roles y permisos si el negocio
+        // lo decide.
+        if (this.configuracion && typeof this.configuracion === "object" && this.configuracion.migracionBorrarDatos !== true) {
+            this.roles.forEach(r => {
+                if (r && r.clave === "administrador" && Array.isArray(r.permisos) && !r.permisos.includes("borrar_datos")) {
+                    r.permisos.push("borrar_datos");
+                }
+            });
+            this.configuracion.migracionBorrarDatos = true;
         }
 
         // 4) Usuario Administrador — solo si no hay ningún usuario todavía.
@@ -512,7 +551,7 @@ const DB = {
             articulos += m.cantidad || 0;
             if (m.factura) facturas.add(m.factura);
         });
-        const gastos = sesion.movimientosCaja.filter(mc => mc.tipo === "gasto").reduce((s, mc) => s + mc.monto, 0);
+        const gastos = sesion.movimientosCaja.filter(mc => mc.tipo === "gasto" && !mc.anulado).reduce((s, mc) => s + mc.monto, 0);
         const retiros = sesion.movimientosCaja.filter(mc => mc.tipo === "retiro").reduce((s, mc) => s + mc.monto, 0);
         // Fase J6-A: abonos de deuda, SEPARADOS de las ventas (no se mezclan,
         // son conceptos contables distintos), pero sí entran al efectivo
@@ -580,16 +619,122 @@ const DB = {
     agregarGasto(gasto) {
         gasto.id = this.generarId("gasto");
         gasto.fechaCreacion = new Date().toISOString();
+        if (gasto.anulado === undefined) gasto.anulado = false;
         this.gastos.push(gasto);
         this.guardar();
         return gasto;
     },
 
-    actualizarGasto(id, datos) {
-        const idx = this.gastos.findIndex(g => g.id === id);
-        if (idx !== -1) { this.gastos[idx] = { ...this.gastos[idx], ...datos }; this.guardar(); }
+    // Fase 4B: única función que crea el vínculo entre un gasto pagado en
+    // efectivo y su movimiento de caja espejo. No la usan retiros, abonos,
+    // devoluciones ni "Salida de Efectivo" — esos siguen exactamente igual
+    // que antes, sin ningún gastoId.
+    vincularGastoConCaja(gasto) {
+        if (gasto.movCajaId) return null; // ya está vinculado: nunca crear una segunda salida de caja para el mismo gasto
+        const sesion = this.sesionCajaActiva();
+        if (!sesion) return null; // red de seguridad: la UI ya debió comprobar esto antes
+        const mc = this.agregarMovimientoCaja("gasto", gasto.monto, gasto.concepto, { gastoId: gasto.id });
+        if (!mc) return null;
+        gasto.movCajaId = mc.id;
+        gasto.sesionCajaId = sesion.id;
+        this.guardar();
+        return mc;
     },
 
+    // Fase 4B: única puerta de entrada para modificar un gasto. Decide por
+    // sí sola qué hacer con el movimiento de caja espejo (si existe) según
+    // si su sesión sigue abierta o ya se cerró — ninguna otra función debe
+    // tocar movimientosCaja directamente por un cambio de gasto.
+    // Devuelve {ok:true, gasto} o {ok:false, motivo} — SIN escribir nada
+    // cuando ok es false (todas las comprobaciones van antes de tocar
+    // cualquiera de los dos lados).
+    actualizarGasto(id, datos) {
+        const idx = this.gastos.findIndex(g => g.id === id);
+        if (idx === -1) return { ok: false, motivo: "Gasto no encontrado." };
+        const gasto = this.gastos[idx];
+        if (gasto.anulado) return { ok: false, motivo: "Este gasto está anulado; no se puede editar." };
+
+        const sesionVinculada = gasto.sesionCajaId ? this.sesionesCaja.find(s => s.id === gasto.sesionCajaId) : null;
+        const sesionAbierta = !!(sesionVinculada && sesionVinculada.estado === "abierta");
+
+        const cambiaMetodo = ("metodoPago" in datos) && datos.metodoPago !== (gasto.metodoPago || null);
+        const metodoNuevo = cambiaMetodo ? datos.metodoPago : gasto.metodoPago;
+        const cambiaMonto = ("monto" in datos) && Number(datos.monto) !== Number(gasto.monto);
+
+        // Un gasto vinculado a una sesión ya cerrada es inmutable en lo que
+        // respecta al método de pago: esa caja cerrada no puede alterarse
+        // retrospectivamente, así que tampoco se permite reinterpretar de
+        // dónde salió el dinero.
+        if (cambiaMetodo && gasto.movCajaId && sesionVinculada && !sesionAbierta) {
+            return { ok: false, motivo: "Este gasto pertenece a una caja ya cerrada; no se puede cambiar el método de pago." };
+        }
+
+        // Determinar, ANTES de escribir nada, qué acción de caja hace falta.
+        let accionCaja = null; // { tipo: "anular" } | { tipo: "crear" }
+        if (cambiaMetodo) {
+            const eraEfectivo = gasto.metodoPago === "efectivo";
+            const seraEfectivo = metodoNuevo === "efectivo";
+            if (eraEfectivo && !seraEfectivo && gasto.movCajaId && sesionAbierta) {
+                accionCaja = { tipo: "anular" };
+            } else if (!eraEfectivo && seraEfectivo) {
+                if (!this.sesionCajaActiva()) {
+                    return { ok: false, motivo: "No hay una caja abierta para vincular este gasto en efectivo." };
+                }
+                accionCaja = { tipo: "crear" };
+            }
+        }
+
+        // Todas las validaciones pasaron: recién ahora se escribe, todo junto.
+        Object.assign(gasto, datos);
+
+        if (accionCaja && accionCaja.tipo === "anular") {
+            const mc = sesionVinculada.movimientosCaja.find(m => m.gastoId === gasto.id);
+            if (mc) mc.anulado = true;
+            gasto.movCajaId = null;
+            gasto.sesionCajaId = null;
+        } else if (accionCaja && accionCaja.tipo === "crear") {
+            this.vincularGastoConCaja(gasto);
+        } else if (cambiaMonto && gasto.movCajaId && sesionAbierta) {
+            // Solo monto cambia (sin cambio de método): se refleja en el
+            // espejo únicamente si la sesión sigue abierta. Si ya cerró, el
+            // gasto cambia pero el movimiento/cierre históricos no se tocan.
+            const mc = sesionVinculada.movimientosCaja.find(m => m.gastoId === gasto.id);
+            if (mc) mc.monto = Number(datos.monto);
+        }
+
+        this.guardar();
+        return { ok: true, gasto };
+    },
+
+    // Fase 4B: reemplaza al borrado físico desde la interfaz. Un gasto
+    // anulado nunca desaparece del historial ni de este array.
+    anularGasto(id, motivo) {
+        const gasto = this.gastos.find(g => g.id === id);
+        if (!gasto) return { ok: false, motivo: "Gasto no encontrado." };
+        if (gasto.anulado) return { ok: false, motivo: "Este gasto ya estaba anulado." };
+
+        gasto.anulado = true;
+        gasto.fechaAnulacion = new Date().toISOString();
+        gasto.motivoAnulacion = motivo || "";
+
+        if (gasto.movCajaId && gasto.sesionCajaId) {
+            const sesion = this.sesionesCaja.find(s => s.id === gasto.sesionCajaId);
+            if (sesion && sesion.estado === "abierta") {
+                // Localizado exclusivamente por gastoId: nunca toca retiros,
+                // abonos, devoluciones ni otras "Salidas de Efectivo".
+                const mc = sesion.movimientosCaja.find(m => m.gastoId === gasto.id);
+                if (mc) mc.anulado = true;
+            }
+            // Sesión ya cerrada: el movimiento y el cierre históricos no se
+            // tocan bajo ninguna circunstancia — solo queda anulado el gasto.
+        }
+
+        this.guardar();
+        return { ok: true, gasto };
+    },
+
+    // Se conserva solo por compatibilidad si algo más la referenciara; ya
+    // no es el camino normal desde la interfaz (ver anularGasto).
     eliminarGasto(id) {
         this.gastos = this.gastos.filter(g => g.id !== id);
         this.guardar();
@@ -599,6 +744,7 @@ const DB = {
 
     gastosEnRango(inicio, fin) {
         return this.gastos.filter(g => {
+            if (g.anulado) return false;
             const f = new Date(g.fecha);
             return f >= inicio && f <= fin;
         });
@@ -969,6 +1115,7 @@ const CATALOGO_PERMISOS = {
     ],
     "Clientes y proveedores": [
         ["ver_clientes", "Ver clientes"],
+        ["ver_fiados", "Ver detalle de fiados y abonos de clientes"],
         ["editar_clientes", "Editar/crear clientes"],
         ["registrar_abono", "Registrar abonos de clientes (fiado)"],
         ["ver_proveedores", "Ver proveedores"],
@@ -986,7 +1133,8 @@ const CATALOGO_PERMISOS = {
         ["gestionar_cajas", "Gestionar cajas"],
         ["configuracion", "Acceder a configuración crítica"],
         ["onat", "Gestionar ONAT"],
-        ["respaldos", "Exportar/restaurar respaldos"]
+        ["respaldos", "Exportar/restaurar respaldos"],
+        ["borrar_datos", "Borrar datos y reiniciar datos de prueba"]
     ]
 };
 
@@ -1212,6 +1360,7 @@ let fotoTempBlob = null;      // Blob comprimido pendiente de guardar (foto nuev
 let fotoActualId = null;      // fotoId ya guardado en IndexedDB para el producto en edición
 let fotoEliminar = false;     // true si el usuario quitó la foto explícitamente
 let editandoGastoId = null;
+let procesandoGasto = false; // Fase 4B (corrección): evita doble toque en "Guardar Gasto"
 let periodoDashFin = "mes";
 let clienteActualId = null;
 let editandoClienteId = null;
@@ -4296,11 +4445,27 @@ function exportarRespaldo() {
         caja: DB.caja, sesionesCaja: DB.sesionesCaja,
         usuarios: DB.usuarios, roles: DB.roles, tiendas: DB.tiendas, cajas: DB.cajas
     };
+    const ultimoRespaldoPrevio = DB.configuracion.ultimoRespaldo;
     DB.configuracion.ultimoRespaldo = respaldo.fecha;
+    // Fase J8-A: se comprueba que el respaldo sea íntegro ANTES de ofrecerlo
+    // (se serializa, se vuelve a leer y se comparan las cantidades por tabla).
+    let textoRespaldo;
+    try {
+        textoRespaldo = JSON.stringify(respaldo, null, 2);
+        const copia = JSON.parse(textoRespaldo);
+        for (const t of _TABLAS_RESPALDO) {
+            if (!Array.isArray(copia[t]) || copia[t].length !== respaldo[t].length) throw new Error(`La tabla "${t}" no coincide`);
+        }
+    } catch (err) {
+        console.error("exportarRespaldo(): respaldo no íntegro.", err);
+        DB.configuracion.ultimoRespaldo = ultimoRespaldoPrevio;
+        alert("🔴 No se pudo generar un respaldo íntegro, así que no se descargó. Tus datos no se modificaron.");
+        return;
+    }
     DB.guardar();
     const el = document.getElementById("subUltimoRespaldo");
     if (el) el.innerText = new Date(respaldo.fecha).toLocaleString("es-CU");
-    const blob = new Blob([JSON.stringify(respaldo, null, 2)], { type: "application/json" });
+    const blob = new Blob([textoRespaldo], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -4373,21 +4538,258 @@ function importarRespaldo(e) {
     e.target.value = "";
 }
 
-function confirmarBorrarSoloProductos() {
-    if (!confirm("⚠️ Esto eliminará todos los productos y movimientos (tus pruebas), pero mantiene tu configuración del negocio y los almacenes. ¿Continuar?")) return;
-    DB.productos = [];
-    DB.movimientos = [];
-    DB.guardar();
-    alert("✅ Productos y movimientos eliminados. Tu configuración y almacenes se mantienen.");
-    actualizarInicio();
+// ═══════════════════════════════════════════════
+// FASE J8-A — BORRADO SEGURO DE DATOS
+// ═══════════════════════════════════════════════
+// Reemplaza a confirmarBorrarSoloProductos() y confirmarBorrarDatos(), que
+// no validaban permiso, caja abierta, fiados ni respaldo. Hay tres
+// operaciones distintas, cada una con sus propios efectos:
+//   catalogo  — solo vacía DB.productos (el historial se conserva)
+//   operativo — reinicia productos, movimientos, cajas y abonos juntos,
+//               para no dejar referencias huérfanas (deudas condonadas en
+//               silencio, caja apuntando a ventas inexistentes)
+//   total     — restablecimiento completo (localStorage.clear())
+// Reglas comunes (se validan al empezar Y justo antes de ejecutar):
+//   1) permiso borrar_datos 2) usuario identificado (legacy BLOQUEADO)
+//   3) sin caja abierta 4) sin fiados pendientes (operativo/total)
+//   5) respaldo verificado: el archivo descargado debe seleccionarse y su
+//      huella SHA-256 debe coincidir con los datos actuales, con menos de
+//      15 minutos de antigüedad 6) confirmación escrita.
+// Las fotos de productos (IndexedDB) NO se borran ni están en el respaldo.
+const BORRADO_VIGENCIA_RESPALDO_MS = 15 * 60 * 1000;
+const BORRADO_OPERACIONES = {
+    catalogo: {
+        titulo: "Vaciar catálogo de productos", palabra: "VACIAR", revisaFiados: false,
+        efecto: "Se eliminarán TODOS los productos del catálogo, con su stock y lotes. Se conservan ventas, movimientos, clientes, deudas, abonos, caja, gastos y configuración."
+    },
+    operativo: {
+        titulo: "Reiniciar datos operativos", palabra: "REINICIAR", revisaFiados: true,
+        efecto: "Se eliminarán productos, movimientos (ventas, entradas, devoluciones), sesiones y cierres de caja y los abonos de clientes. Se conservan configuración, usuarios y roles, almacenes, clientes, proveedores y gastos. Los reportes y la base de ONAT quedarán en cero."
+    },
+    total: {
+        titulo: "Restablecimiento total", palabra: "BORRAR TODO", revisaFiados: true,
+        efecto: "Se eliminarán TODOS los datos de la app, incluidos usuarios, roles, PIN y configuración. Al reiniciar se recreará el usuario <b>admin</b> con PIN <b>1234</b> y el acceso con PIN quedará desactivado."
+    }
+};
+let borradoOperacionActual = null;
+let borradoVerificado = null; // { op, huella } — vale para UNA sola ejecución
+
+// Serialización canónica (claves ordenadas, sin undefined) para que el
+// archivo del respaldo y los datos vivos produzcan exactamente el mismo texto.
+function _canonico(v) {
+    if (Array.isArray(v)) return "[" + v.map(_canonico).join(",") + "]";
+    if (v && typeof v === "object") {
+        return "{" + Object.keys(v).filter(k => v[k] !== undefined && typeof v[k] !== "function").sort()
+            .map(k => JSON.stringify(k) + ":" + _canonico(v[k])).join(",") + "}";
+    }
+    return JSON.stringify(v === undefined ? null : v);
+}
+async function _sha256Hex(texto) {
+    if (window.crypto && crypto.subtle && typeof TextEncoder !== "undefined") {
+        const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(texto));
+        return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+    }
+    // Respaldo para contextos sin Web Crypto: hash no criptográfico (cyrb53),
+    // suficiente para comparar igualdad de datos (no se usa para seguridad).
+    let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+    for (let i = 0; i < texto.length; i++) {
+        const ch = texto.charCodeAt(i);
+        h1 = Math.imul(h1 ^ ch, 2654435761); h2 = Math.imul(h2 ^ ch, 1597334677);
+    }
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+    return "f" + (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16);
+}
+// Qué entra en la huella: las 12 tablas del respaldo + configuración SIN
+// "ultimoRespaldo" (exportar lo modifica y rompería la comparación).
+function _tablasHuella(src) {
+    const cfg = Object.assign({}, src.configuracion || {});
+    delete cfg.ultimoRespaldo;
+    return {
+        productos: src.productos || [], movimientos: src.movimientos || [], almacenes: src.almacenes || [],
+        gastos: src.gastos || [], clientes: src.clientes || [], proveedores: src.proveedores || [],
+        caja: src.caja || {}, sesionesCaja: src.sesionesCaja || [], usuarios: src.usuarios || [],
+        roles: src.roles || [], tiendas: src.tiendas || [], cajas: src.cajas || [], configuracion: cfg
+    };
+}
+function calcularHuellaDatos(src) { return _sha256Hex(_canonico(_tablasHuella(src))); }
+
+const _TABLAS_RESPALDO = ["productos","movimientos","almacenes","gastos","clientes","proveedores","sesionesCaja","usuarios","roles","tiendas","cajas"];
+// Devuelve null si el archivo es un respaldo completo y vigente; si no, el motivo.
+function validarRespaldoParaBorrado(d) {
+    if (!d || typeof d !== "object" || Array.isArray(d)) return "El archivo no es un respaldo de INVENTARY ARB.";
+    if (typeof d.version !== "string") return "El archivo no tiene versión de respaldo.";
+    for (const t of _TABLAS_RESPALDO) {
+        if (!Array.isArray(d[t])) return `Al respaldo le falta la tabla "${t}" (¿es un respaldo de una versión antigua?). Exporta uno nuevo.`;
+    }
+    if (!d.caja || typeof d.caja !== "object" || Array.isArray(d.caja)) return 'Al respaldo le falta la tabla "caja".';
+    if (!d.configuracion || typeof d.configuracion !== "object") return 'Al respaldo le falta la "configuracion".';
+    const t = new Date(d.fecha).getTime();
+    if (isNaN(t)) return "El respaldo no tiene una fecha válida.";
+    const edad = Date.now() - t;
+    if (edad < -2 * 60 * 1000) return "La fecha del respaldo está en el futuro.";
+    if (edad > BORRADO_VIGENCIA_RESPALDO_MS) return `El respaldo tiene ${Math.round(edad / 60000)} min de antigüedad (máximo ${BORRADO_VIGENCIA_RESPALDO_MS / 60000}). Exporta uno nuevo.`;
+    return null;
+}
+
+function resolverAccesoBorrado(op) {
+    const def = BORRADO_OPERACIONES[op];
+    if (!def) return { permitido: false, motivo: "Operación de borrado desconocida." };
+    if (usuarioActual === null) {
+        return { permitido: false, motivo: "El borrado de datos no está disponible sin un usuario identificado. Activa el acceso con PIN en Configuración → Seguridad e inicia sesión con un usuario Administrador." };
+    }
+    const r = contextoPuedeOperar("borrar_datos");
+    if (!r.permitido) return { permitido: false, motivo: r.motivo };
+    const idSesion = DB.caja && DB.caja.sesionActiva;
+    const sesion = idSesion ? DB.sesionesCaja.find(s => s.id === idSesion) : null;
+    if (sesion && sesion.estado !== "cerrada") {
+        return { permitido: false, motivo: "Hay una caja abierta. Ciérrala antes de borrar datos." };
+    }
+    if (def.revisaFiados) {
+        const deudores = DB.clientes.filter(c => DB.saldoCliente(c.id) > 0);
+        if (deudores.length > 0) {
+            const nombres = deudores.slice(0, 5).map(c => c.nombre).join(", ") + (deudores.length > 5 ? ` y ${deudores.length - 5} más` : "");
+            return { permitido: false, motivo: `Hay fiados pendientes (${deudores.length} cliente(s): ${nombres}). Cóbralos o resuélvelos antes de borrar; el sistema no puede saber si son de prueba.` };
+        }
+    }
+    return { permitido: true, motivo: null };
+}
+
+function iniciarBorradoSeguro(op) {
+    const def = BORRADO_OPERACIONES[op]; if (!def) return;
+    const acceso = resolverAccesoBorrado(op);
+    if (!acceso.permitido) { alert(`⛔ No se puede continuar:\n\n${acceso.motivo}`); return; }
+    borradoOperacionActual = op;
+    borradoVerificado = null;
+    mostrarModalGenerico({
+        tipo: "confirmar",
+        titulo: def.titulo,
+        mensaje: `${def.efecto}<br><br><b>Antes de continuar necesitas un respaldo verificado:</b><br>1) Toca "Exportar respaldo".<br>2) Vuelve a esta pantalla y toca "Seleccionar respaldo" para elegir el archivo descargado. La app comprobará que coincide con tus datos actuales.<br><br><small>Las fotos de productos no están en el respaldo.</small>`,
+        textoConfirmar: "Seleccionar respaldo",
+        textoSecundario: "Exportar respaldo",
+        onConfirmar: () => { document.getElementById("archivoVerificarRespaldo").click(); },
+        onSecundario: () => { exportarRespaldo(); setTimeout(() => iniciarBorradoSeguro(op), 900); }
+    });
+}
+
+function verificarRespaldoParaBorrar(e) {
+    const archivo = e.target.files[0];
+    e.target.value = "";
+    const op = borradoOperacionActual;
+    if (!archivo || !op) return;
+    const acceso = resolverAccesoBorrado(op);
+    if (!acceso.permitido) { alert(`⛔ No se puede continuar:\n\n${acceso.motivo}`); return; }
+    const reader = new FileReader();
+    reader.onerror = () => alert("⚠️ No se pudo leer el archivo. El borrado se canceló y no se modificó ningún dato.");
+    reader.onload = async (ev) => {
+        try {
+            let datos;
+            try { datos = JSON.parse(ev.target.result); }
+            catch { alert("⚠️ El archivo no es un respaldo válido (no se pudo leer). No se modificó ningún dato."); return; }
+            const motivo = validarRespaldoParaBorrado(datos);
+            if (motivo) { alert(`⚠️ Respaldo no válido:\n\n${motivo}\n\nNo se modificó ningún dato.`); return; }
+            const huellaArchivo = await calcularHuellaDatos(datos);
+            const huellaActual = await calcularHuellaDatos(DB);
+            if (huellaArchivo !== huellaActual) {
+                alert("⚠️ El respaldo seleccionado NO coincide con los datos actuales (es de otro momento, de otro archivo, o se hicieron cambios después de exportarlo).\n\nExporta un respaldo nuevo, sin hacer cambios después, y selecciónalo. No se modificó ningún dato.");
+                return;
+            }
+            borradoVerificado = { op, huella: huellaActual };
+            const def = BORRADO_OPERACIONES[op];
+            mostrarModalGenerico({
+                tipo: "texto",
+                titulo: def.titulo,
+                mensaje: `✅ Respaldo verificado: ${datos.productos.length} productos, ${datos.movimientos.length} movimientos, ${datos.clientes.length} clientes.<br><br>${def.efecto}<br><br>Esta acción NO se puede deshacer. Escribe <b>${def.palabra}</b> para confirmar:`,
+                placeholder: def.palabra,
+                textoConfirmar: "Ejecutar",
+                onConfirmar: (v) => {
+                    if (String(v || "").trim().toUpperCase() !== def.palabra) {
+                        borradoVerificado = null;
+                        alert("Confirmación incorrecta. No se modificó ningún dato.");
+                        return;
+                    }
+                    ejecutarBorradoSeguro(op);
+                }
+            });
+        } catch (err) {
+            console.error("verificarRespaldoParaBorrar():", err);
+            alert("⚠️ No se pudo verificar el respaldo. El borrado se canceló y no se modificó ningún dato.");
+        }
+    };
+    reader.readAsText(archivo);
+}
+
+// Asigna varias tablas a la vez y las persiste de forma SÍNCRONA. Si el
+// guardado falla, restaura los valores previos y vuelve a guardar para que
+// localStorage no quede con un estado parcial (guardar() escribe 13 claves
+// una por una). Las asignaciones reemplazan los arrays (no los mutan), así
+// que las referencias previas siguen intactas para poder restaurarlas.
+function _aplicarCambioAtomico(nuevos) {
+    const claves = Object.keys(nuevos);
+    const previos = {};
+    claves.forEach(k => { previos[k] = DB[k]; });
+    DB._errorGuardado = false;
+    try {
+        claves.forEach(k => { DB[k] = nuevos[k]; });
+        DB._guardarInmediato();
+        if (DB._errorGuardado) throw new Error("No se pudo escribir en localStorage");
+        return true;
+    } catch (err) {
+        console.error("_aplicarCambioAtomico():", err);
+        claves.forEach(k => { DB[k] = previos[k]; });
+        DB._errorGuardado = false;
+        try { DB._guardarInmediato(); } catch (e2) { console.error(e2); }
+        return false;
+    }
+}
+
+async function ejecutarBorradoSeguro(op) {
+    const def = BORRADO_OPERACIONES[op]; if (!def) return;
+    // Segunda comprobación, justo antes de tocar los datos (J7).
+    const acceso = resolverAccesoBorrado(op);
+    if (!acceso.permitido) { borradoVerificado = null; alert(`⛔ No se pudo ejecutar:\n\n${acceso.motivo}\n\nNo se modificó ningún dato.`); return; }
+    if (!borradoVerificado || borradoVerificado.op !== op) { alert("⚠️ Falta la verificación del respaldo. No se modificó ningún dato."); return; }
+    const huellaAhora = await calcularHuellaDatos(DB);
+    const esperada = borradoVerificado.huella;
+    borradoVerificado = null; // un respaldo verificado sirve para una sola ejecución
+    if (huellaAhora !== esperada) {
+        alert("⚠️ Los datos cambiaron después de verificar el respaldo. Operación cancelada; no se modificó ningún dato.");
+        return;
+    }
+    if (op === "total") { ejecutarRestablecimientoTotal(); return; }
+
+    const nuevos = op === "catalogo"
+        ? { productos: [] }
+        : {
+            productos: [], movimientos: [], sesionesCaja: [],
+            caja: Object.assign({}, DB.caja, { sesionActiva: null }),
+            clientes: DB.clientes.map(c => Object.assign({}, c, { abonos: [] }))
+        };
+    if (!_aplicarCambioAtomico(nuevos)) {
+        alert("🔴 No se pudo completar el borrado. Tus datos anteriores se restauraron y siguen intactos.");
+        return;
+    }
+    alert(op === "catalogo"
+        ? "✅ Catálogo de productos vaciado. El historial se conserva."
+        : "✅ Datos operativos reiniciados. Configuración, usuarios, almacenes, clientes, proveedores y gastos se conservan.");
     location.reload();
 }
 
-function confirmarBorrarDatos() {
-    if (!confirm("⚠️ ADVERTENCIA: Esto eliminará TODOS los productos, movimientos y configuración. Esta acción NO se puede deshacer.\n\n¿Estás completamente seguro?")) return;
-    if (!confirm("⚠️ Última confirmación: ¿Borrar todo permanentemente?")) return;
-    localStorage.clear();
-    alert("✅ Todos los datos eliminados.");
+function ejecutarRestablecimientoTotal() {
+    // Se desactiva el guardado ANTES de borrar: si no, el manejador de
+    // pagehide/visibilitychange podría volver a escribir los datos en
+    // memoria justo después de localStorage.clear().
+    DB.guardar = function () {};
+    DB._guardarInmediato = function () {};
+    try {
+        localStorage.clear();
+    } catch (err) {
+        console.error("ejecutarRestablecimientoTotal():", err);
+        alert("🔴 No se pudo borrar. La app se recargará con tus datos intactos.");
+        location.reload();
+        return;
+    }
+    alert("✅ Todos los datos eliminados. La app se reiniciará.");
     location.reload();
 }
 
@@ -6039,11 +6441,12 @@ function mostrarGastos() {
         const fechaStr = fecha.toLocaleDateString("es-CU");
         const almacenTxt = g.almacen ? ` · 🏪 ${g.almacen}` : "";
         const recurrenteTag = g.recurrente ? `<span class="badge-pro" style="background:rgba(99,179,237,0.15);color:#63b3ed;">🔁 Recurrente</span>` : "";
+        const anuladoTag = g.anulado ? `<span class="badge-pro" style="background:rgba(255,107,74,0.15);color:var(--warn);">🚫 Anulado</span>` : "";
         return `
-        <div class="gas-card" onclick="abrirModalGasto('${g.id}')">
+        <div class="gas-card" onclick="abrirModalGasto('${g.id}')" style="${g.anulado ? 'opacity:0.55;' : ''}">
             <div class="gas-card-icono">${cat.icono}</div>
             <div class="gas-card-info">
-                <h4>${g.concepto}${recurrenteTag}</h4>
+                <h4>${g.concepto}${recurrenteTag}${anuladoTag}</h4>
                 <p>${cat.nombre}${almacenTxt} · ${fechaStr}</p>
             </div>
             <div class="gas-card-monto">-${(g.monto||0).toLocaleString("es-CU")} ${moneda}</div>
@@ -6069,6 +6472,7 @@ function abrirModalGasto(id) {
         document.getElementById("gasComprobante").value = g.comprobante || "";
         document.getElementById("gasRecurrente").checked = g.recurrente === true;
         document.getElementById("gasNota").value = g.nota || "";
+        document.getElementById("gasMetodoPago").value = g.metodoPago || "";
         document.getElementById("btnEliminarGasto").classList.remove("oculto");
     } else {
         editandoGastoId = null;
@@ -6082,6 +6486,7 @@ function abrirModalGasto(id) {
         document.getElementById("gasRecurrente").checked = false;
         document.getElementById("btnEliminarGasto").classList.add("oculto");
         document.getElementById("gasNota").value = "";
+        document.getElementById("gasMetodoPago").value = "";
     }
     document.getElementById("modalGasto").classList.remove("oculto");
     document.getElementById("btnNuevoGasto").classList.add("ocultar-boton");
@@ -6094,48 +6499,68 @@ function cerrarModalGasto() {
 }
 
 document.getElementById("btnGuardarGasto").addEventListener("click", () => {
-    // Fase J3: segunda comprobación justo antes de tocar DB.
-    const acceso = resolverAccesoModulo("registrar_gastos");
-    if (acceso.modo === "bloqueado") { alert(`⛔ No se puede guardar el gasto:\n\n${acceso.motivo}`); return; }
-    const concepto = document.getElementById("gasConcepto").value.trim();
-    const monto = Number(document.getElementById("gasMonto").value);
-    const categoria = document.getElementById("gasCategoria").value;
-    const fecha = document.getElementById("gasFecha").value;
-    if (!concepto) { alert("⚠️ El concepto es obligatorio."); return; }
-    if (!monto || monto <= 0) { alert("⚠️ El monto debe ser mayor a 0."); return; }
-    if (!categoria) { alert("⚠️ Selecciona una categoría."); return; }
-    if (!fecha) { alert("⚠️ Selecciona una fecha."); return; }
+    if (procesandoGasto) return; // ya se está procesando un guardado, ignorar el toque repetido
+    procesandoGasto = true;
+    try {
+        // Fase J3: segunda comprobación justo antes de tocar DB.
+        const acceso = resolverAccesoModulo("registrar_gastos");
+        if (acceso.modo === "bloqueado") { alert(`⛔ No se puede guardar el gasto:\n\n${acceso.motivo}`); return; }
+        const concepto = document.getElementById("gasConcepto").value.trim();
+        const monto = Number(document.getElementById("gasMonto").value);
+        const categoria = document.getElementById("gasCategoria").value;
+        const fecha = document.getElementById("gasFecha").value;
+        if (!concepto) { alert("⚠️ El concepto es obligatorio."); return; }
+        if (!monto || monto <= 0) { alert("⚠️ El monto debe ser mayor a 0."); return; }
+        if (!categoria) { alert("⚠️ Selecciona una categoría."); return; }
+        if (!fecha) { alert("⚠️ Selecciona una fecha."); return; }
 
-    const datos = {
-        concepto, monto, categoria,
-        fecha: new Date(fecha).toISOString(),
-        almacen: document.getElementById("gasAlmacen").value,
-        comprobante: document.getElementById("gasComprobante").value.trim(),
-        recurrente: document.getElementById("gasRecurrente").checked,
-        nota: document.getElementById("gasNota").value.trim()
-    };
+        const datos = {
+            concepto, monto, categoria,
+            fecha: new Date(fecha).toISOString(),
+            almacen: document.getElementById("gasAlmacen").value,
+            comprobante: document.getElementById("gasComprobante").value.trim(),
+            recurrente: document.getElementById("gasRecurrente").checked,
+            nota: document.getElementById("gasNota").value.trim(),
+            metodoPago: document.getElementById("gasMetodoPago").value || null
+        };
 
-    if (editandoGastoId) {
-        DB.actualizarGasto(editandoGastoId, datos);
-        mostrarToast("✅ Gasto actualizado");
-    } else {
-        DB.agregarGasto(datos);
-        mostrarToast("✅ Gasto registrado");
+        if (editandoGastoId) {
+            const resultado = DB.actualizarGasto(editandoGastoId, datos);
+            if (!resultado.ok) { alert(`⚠️ ${resultado.motivo}`); return; }
+            mostrarToast("✅ Gasto actualizado");
+        } else {
+            // Fase 4B: flujo seguro — si el método es efectivo, se comprueba
+            // que haya caja abierta ANTES de crear nada. Si no la hay, no se
+            // guarda el gasto en absoluto (evita un gasto en efectivo "suelto"
+            // sin caja que lo respalde).
+            if (datos.metodoPago === "efectivo" && !DB.sesionCajaActiva()) {
+                alert("⚠️ No hay una caja abierta para registrar este pago en efectivo.");
+                return;
+            }
+            const nuevo = DB.agregarGasto(datos);
+            if (datos.metodoPago === "efectivo") DB.vincularGastoConCaja(nuevo);
+            mostrarToast("✅ Gasto registrado");
+        }
+        cerrarModalGasto();
+        mostrarGastos();
+    } finally {
+        procesandoGasto = false; // se libera siempre, tanto en éxito como en cualquier salida por validación/error
     }
-    cerrarModalGasto();
-    mostrarGastos();
 });
 
 function eliminarGastoActual() {
     if (!editandoGastoId) return;
-    if (!confirm("¿Eliminar este gasto?")) return;
+    const motivo = prompt("Motivo de la anulación (opcional):", "");
+    if (motivo === null) return; // canceló el prompt
+    if (!confirm("¿Anular este gasto? Seguirá visible en el historial marcado como anulado.")) return;
     // Fase J3: segunda comprobación justo antes de tocar DB.
     const acceso = resolverAccesoModulo("registrar_gastos");
-    if (acceso.modo === "bloqueado") { alert(`⛔ No se pudo eliminar:\n\n${acceso.motivo}`); return; }
-    DB.eliminarGasto(editandoGastoId);
+    if (acceso.modo === "bloqueado") { alert(`⛔ No se pudo anular:\n\n${acceso.motivo}`); return; }
+    const resultado = DB.anularGasto(editandoGastoId, motivo.trim());
+    if (!resultado.ok) { alert(`⚠️ ${resultado.motivo}`); return; }
     cerrarModalGasto();
     mostrarGastos();
-    mostrarToast("✅ Gasto eliminado");
+    mostrarToast("✅ Gasto anulado");
 }
 
 function toggleMenuOpcionesGastos() {
@@ -6149,7 +6574,7 @@ function verificarRecurrentesPendientes() {
     const mes = rangoMes();
     // Encuentra gastos marcados como recurrentes de meses anteriores que no tienen versión este mes (mismo concepto)
     const recurrentesUnicos = {};
-    DB.gastos.filter(g => g.recurrente).forEach(g => {
+    DB.gastos.filter(g => g.recurrente && !g.anulado).forEach(g => {
         if (!recurrentesUnicos[g.concepto] || new Date(g.fecha) > new Date(recurrentesUnicos[g.concepto].fecha)) {
             recurrentesUnicos[g.concepto] = g;
         }
@@ -6271,7 +6696,7 @@ function actualizarDashboardFinanciero() {
 // ── Exportar Gastos ──
 function exportarGastosExcel() {
     document.getElementById("menuOpcionesGastos").classList.add("oculto");
-    const datos = DB.gastos.map(g => ({
+    const datos = DB.gastos.filter(g => !g.anulado).map(g => ({
         Concepto: g.concepto, Categoría: CATEGORIAS_GASTO[g.categoria]?.nombre || g.categoria,
         Monto: g.monto, Fecha: new Date(g.fecha).toLocaleDateString("es-CU"),
         Almacén: g.almacen || "", Comprobante: g.comprobante || "",
@@ -6295,7 +6720,7 @@ function exportarGastosPDF() {
     doc.autoTable({
         startY: 28,
         head: [["Concepto","Categoría","Monto","Fecha","Almacén"]],
-        body: DB.gastos.map(g => [
+        body: DB.gastos.filter(g => !g.anulado).map(g => [
             g.concepto, CATEGORIAS_GASTO[g.categoria]?.nombre || g.categoria,
             (g.monto||0).toLocaleString("es-CU") + " " + (cfg.moneda||"CUP"),
             new Date(g.fecha).toLocaleDateString("es-CU"), g.almacen || "—"

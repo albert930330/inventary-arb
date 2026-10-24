@@ -1586,6 +1586,17 @@
   <input type="text" id="gasConcepto" placeholder="Ej: Combustible para moto">
   <label>Monto *</label>
   <input type="number" id="gasMonto" placeholder="0.00" min="0">
+  <label>Método de pago (opcional)</label>
+  <select id="gasMetodoPago">
+    <option value="">— Sin especificar —</option>
+    <option value="efectivo">💵 Efectivo</option>
+    <option value="transferencia">🏦 Transferencia</option>
+    <option value="otro">🧾 Otro</option>
+  </select>
+  <div class="cfg-info-box" style="margin-top:8px;">
+    <span>💵</span>
+    <p>Si eliges "Efectivo" y tienes una caja abierta, este gasto se descuenta automáticamente del efectivo de esa caja.</p>
+  </div>
   <label>Categoría *</label>
   <select id="gasCategoria">
     <option value="">— Seleccionar —</option>
@@ -1621,7 +1632,7 @@
   <label>Nota (opcional)</label>
   <textarea id="gasNota" placeholder="Observaciones..."></textarea>
   <button id="btnGuardarGasto">💾 Guardar Gasto</button>
-  <button id="btnEliminarGasto" class="oculto" onclick="eliminarGastoActual()" style="width:100%;margin-top:10px;padding:14px;background:rgba(255,107,74,0.1);border:1px solid rgba(255,107,74,0.25);border-radius:14px;color:var(--warn);font-size:14px;font-weight:600;cursor:pointer;">🗑️ Eliminar Gasto</button>
+  <button id="btnEliminarGasto" class="oculto" onclick="eliminarGastoActual()" style="width:100%;margin-top:10px;padding:14px;background:rgba(255,107,74,0.1);border:1px solid rgba(255,107,74,0.25);border-radius:14px;color:var(--warn);font-size:14px;font-weight:600;cursor:pointer;">🚫 Anular Gasto</button>
 </div>
 </div>
 
@@ -2365,9 +2376,17 @@
 
     <div class="cfg-grupo-label">ZONA DE PELIGRO</div>
     <div class="cfg-grupo">
-      <button class="cfg-btn-accion cfg-btn-danger2" onclick="confirmarBorrarSoloProductos()">🧹 Borrar solo productos y movimientos</button>
+      <div class="cfg-info-box2">
+        <span>🔒</span>
+        <p>Requiere permiso de borrado, usuario identificado, caja cerrada y un respaldo verificado de menos de 15 minutos.</p>
+      </div>
       <div class="cfg-row-sep"></div>
-      <button class="cfg-btn-accion cfg-btn-danger2" onclick="confirmarBorrarDatos()">🗑️ Borrar todos los datos (incluye configuración)</button>
+      <button class="cfg-btn-accion cfg-btn-danger2" onclick="iniciarBorradoSeguro('catalogo')">🧹 Vaciar catálogo de productos</button>
+      <div class="cfg-row-sep"></div>
+      <button class="cfg-btn-accion cfg-btn-danger2" onclick="iniciarBorradoSeguro('operativo')">♻️ Reiniciar datos operativos (pruebas)</button>
+      <div class="cfg-row-sep"></div>
+      <button class="cfg-btn-accion cfg-btn-danger2" onclick="iniciarBorradoSeguro('total')">🗑️ Restablecimiento total (incluye usuarios y configuración)</button>
+      <input type="file" id="archivoVerificarRespaldo" accept=".json" style="display:none" onchange="verificarRespaldoParaBorrar(event)">
     </div>
     <div style="height:30px"></div>
   </div>
@@ -2927,6 +2946,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
-<script src="app.js?v=20260731b"></script>
+<script src="app.js?v=20261024b"></script>
 </body>
 </html>
