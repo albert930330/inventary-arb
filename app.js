@@ -162,13 +162,14 @@ const DB = {
             "abrir_caja","cerrar_caja","retiro_caja","registrar_gasto_caja","consultar_caja",
             "ver_clientes","ver_fiados","editar_clientes","registrar_abono","ver_proveedores","editar_proveedores","registrar_gastos",
             "ver_reportes","ver_estadisticas","gestionar_usuarios","gestionar_roles","gestionar_tiendas",
-            "gestionar_cajas","configuracion","onat","respaldos","editar_movimientos","borrar_datos"],
+            "gestionar_cajas","configuracion","onat","respaldos","editar_movimientos","borrar_datos",
+            "config_ventas","config_inventario","gestionar_almacenes"],
         encargado: ["ver_dashboard","ver_inventario","crear_producto","editar_producto",
             "registrar_entrada","ajustar_inventario","transferir_mercancia","recibir_transferencia",
             "vender","vender_fiado","aplicar_descuento","devolucion",
             "abrir_caja","cerrar_caja","retiro_caja","registrar_gasto_caja","consultar_caja",
             "ver_clientes","ver_fiados","editar_clientes","registrar_abono","ver_proveedores","editar_proveedores","registrar_gastos",
-            "ver_reportes","ver_estadisticas"],
+            "ver_reportes","ver_estadisticas","config_ventas","config_inventario"],
         cajero: ["ver_dashboard","ver_inventario","vender","vender_fiado","abrir_caja","cerrar_caja",
             "consultar_caja","ver_clientes","ver_fiados","editar_clientes","registrar_abono"],
         almacenero: ["ver_dashboard","ver_inventario","registrar_entrada","ajustar_inventario",
@@ -265,6 +266,40 @@ const DB = {
                 }
             });
             this.configuracion.migracionBorrarDatos = true;
+        }
+
+        // 3.8) Fase J8-B — permisos config_ventas y config_inventario. Mismas
+        // reglas que 3.6/3.7: una sola vez (marca migracionJ8B === true; si
+        // falta o está dañada, la pasada es solo aditiva), solo roles base
+        // por su campo "clave" ("administrador" y "encargado", nunca por
+        // nombre), solo AGREGA y nunca restaura lo que se haya revocado
+        // después. Cajero, Almacenero y roles personalizados no reciben
+        // nada; el Encargado NO recibe "configuracion" ni "onat".
+        if (this.configuracion && typeof this.configuracion === "object" && this.configuracion.migracionJ8B !== true) {
+            const clavesJ8B = ["administrador", "encargado"];
+            const permisosJ8B = ["config_ventas", "config_inventario"];
+            this.roles.forEach(r => {
+                if (r && clavesJ8B.includes(r.clave) && Array.isArray(r.permisos)) {
+                    permisosJ8B.forEach(p => { if (!r.permisos.includes(p)) r.permisos.push(p); });
+                }
+            });
+            this.configuracion.migracionJ8B = true;
+        }
+
+        // 3.9) Fase J8-C — permiso gestionar_almacenes. Mismas reglas que
+        // 3.6–3.8: una sola vez (marca migracionJ8C === true; si falta o está
+        // dañada, la pasada es solo aditiva y se repara), solo el rol base con
+        // clave "administrador" (nunca por nombre), solo AGREGA y no restaura
+        // lo que se haya revocado después. Encargado, Cajero, Almacenero y
+        // roles personalizados no lo reciben (siguen VIENDO almacenes con
+        // ver_inventario, pero no pueden crear, editar ni eliminar).
+        if (this.configuracion && typeof this.configuracion === "object" && this.configuracion.migracionJ8C !== true) {
+            this.roles.forEach(r => {
+                if (r && r.clave === "administrador" && Array.isArray(r.permisos) && !r.permisos.includes("gestionar_almacenes")) {
+                    r.permisos.push("gestionar_almacenes");
+                }
+            });
+            this.configuracion.migracionJ8C = true;
         }
 
         // 4) Usuario Administrador — solo si no hay ningún usuario todavía.
@@ -1134,7 +1169,10 @@ const CATALOGO_PERMISOS = {
         ["configuracion", "Acceder a configuración crítica"],
         ["onat", "Gestionar ONAT"],
         ["respaldos", "Exportar/restaurar respaldos"],
-        ["borrar_datos", "Borrar datos y reiniciar datos de prueba"]
+        ["borrar_datos", "Borrar datos y reiniciar datos de prueba"],
+        ["config_ventas", "Cambiar ajustes de Ventas"],
+        ["config_inventario", "Cambiar ajustes de Inventario y Notificaciones"],
+        ["gestionar_almacenes", "Crear, editar y eliminar almacenes"]
     ]
 };
 
@@ -1603,6 +1641,10 @@ function abrirHistorial() {
 }
 
 function abrirAlmacenes() {
+    // Fase J8-C: ver almacenes requiere ver_inventario (lo tienen los 4 roles
+    // base). Gestionarlos (crear/editar/eliminar) requiere gestionar_almacenes.
+    const acceso = resolverAccesoModulo("ver_inventario");
+    if (acceso.modo === "bloqueado") { alert(`⛔ No puedes acceder a los almacenes:\n\n${acceso.motivo}`); return; }
     mostrarPantalla("pantallaAlmacenes");
     document.getElementById("btnFlotante").classList.add("ocultar-boton");
     mostrarAlmacenes();
@@ -2213,7 +2255,11 @@ function abrirSubConfig(sub) {
     const permisoRequerido = {
         usuarios: "gestionar_usuarios", roles: "gestionar_roles",
         tiendas: "gestionar_tiendas", cajas: "gestionar_cajas",
-        respaldo: "respaldos", negocio: "configuracion", seguridad: "configuracion"
+        respaldo: "respaldos", negocio: "configuracion", seguridad: "configuracion",
+        // Fase J8-B: antes estas 4 pantallas no tenían ningún control.
+        // Apariencia, Idioma, Exportar, Pro y Acerca siguen abiertas.
+        ventas: "config_ventas", inventario: "config_inventario",
+        notificaciones: "config_inventario", onat: "onat"
     };
     const permiso = permisoRequerido[sub];
     if (permiso) {
@@ -4170,7 +4216,7 @@ function cargarSubConfig(sub) {
                 onclick="seleccionarSubEmoji('${e}')">${e}</button>`).join("");
     }
     else if (sub === "inventario") {
-        document.getElementById("subStockMinimo").value = cfg.stockMinimo || 5;
+        document.getElementById("subStockMinimo").value = cfg.stockMinimo ?? 5;
         document.getElementById("subAlertasStock").checked = cfg.alertasStock !== false;
         document.getElementById("subMostrarAgotados").checked = cfg.mostrarAgotados !== false;
         document.getElementById("subAlertaVencimiento").checked = cfg.alertaVencimiento !== false;
@@ -4182,15 +4228,16 @@ function cargarSubConfig(sub) {
         document.getElementById("subVentasSinStock").checked = cfg.ventasSinStock === true;
         document.getElementById("subSolicitarCliente").checked = cfg.solicitarCliente === true;
         document.getElementById("subCajaObligatoria").checked = cfg.cajaObligatoria === true;
-        document.getElementById("subNumAuto").checked = cfg.numAuto !== false;
-        document.getElementById("subProxFactura").value = cfg.proxFactura || 1;
+        document.getElementById("subNumAuto").checked = true; // Fase J8-B: siempre automática
+        // Se muestra el número que realmente saldría en la próxima venta.
+        document.getElementById("subProxFactura").value = Math.max(Number(cfg.proxFactura) || 1, obtenerUltimaFacturaEmitida() + 1);
     }
     else if (sub === "onat") {
         document.getElementById("subRegimen").value = cfg.regimenFiscal || "TCP";
         document.getElementById("subNumONAT").value = cfg.numONAT || "";
         document.getElementById("subActividad").value = cfg.actividad || "";
         document.getElementById("subImpuestoAuto").checked = cfg.impuestoAuto === true;
-        document.getElementById("subPorcentajeImpuesto").value = cfg.porcentajeImpuesto || 10;
+        document.getElementById("subPorcentajeImpuesto").value = cfg.porcentajeImpuesto ?? 10;
     }
     else if (sub === "notificaciones") {
         document.getElementById("subNotifStockBajo").checked = cfg.notifStockBajo !== false;
@@ -4246,7 +4293,67 @@ function toggleSubPin() {
 function seleccionarTema(tema) { /* Tema claro próximamente */ }
 
 // Guardar cada subpantalla
+// ═══════════════════════════════════════════════
+// FASE J8-B — AUTORIZACIÓN Y VALIDACIÓN DE AJUSTES
+// ═══════════════════════════════════════════════
+// Cada función que guarda ajustes comprueba el permiso AL EJECUTARSE (no
+// solo al abrir la pantalla en abrirSubConfig) y valida TODO antes de
+// escribir: si algo falla, no se modifica ningún dato.
+// Modo legacy (usuarioActual === null): resolverAccesoModulo() lo deja pasar,
+// igual que en las demás fases de configuración (J2–J6) — compatibilidad con
+// instalaciones sin usuarios. Riesgo documentado: en ese modo cualquiera puede
+// cambiar estos ajustes. NO se amplía ese comportamiento a operaciones
+// destructivas: el bloqueo de J8-A (borrado) sigue intacto y es independiente.
+function exigirAccesoConfig(permiso, accion) {
+    const acceso = resolverAccesoModulo(permiso);
+    if (acceso.modo === "bloqueado") {
+        alert(`⛔ No puedes ${accion}:\n\n${acceso.motivo}`);
+        return false;
+    }
+    return true;
+}
+
+// Lee un campo numérico distinguiendo "vacío" de "0": vacío usa `defecto`
+// si se indicó (si no, es un error de campo obligatorio); un 0 explícito se
+// conserva. Nunca usa Number(x) || defecto.
+function leerNumeroCampo(id, { etiqueta, min = null, max = null, entero = false, defecto } = {}) {
+    const el = document.getElementById(id);
+    const crudo = el ? String(el.value).trim() : "";
+    if (crudo === "") {
+        if (defecto !== undefined) return { ok: true, valor: defecto };
+        return { ok: false, error: `"${etiqueta}" es obligatorio.` };
+    }
+    const n = Number(crudo);
+    if (!Number.isFinite(n)) return { ok: false, error: `"${etiqueta}" debe ser un número.` };
+    if (entero && !Number.isInteger(n)) return { ok: false, error: `"${etiqueta}" debe ser un número entero.` };
+    if (min !== null && n < min) return { ok: false, error: `"${etiqueta}" no puede ser menor que ${min}.` };
+    if (max !== null && n > max) return { ok: false, error: `"${etiqueta}" no puede ser mayor que ${max}.` };
+    return { ok: true, valor: n };
+}
+
+// Fecha LOCAL en formato AAAA-MM-DD (toISOString() da la fecha UTC, que de
+// noche en Cuba ya es la del día siguiente).
+function fechaLocalISO(d = new Date()) {
+    const p = n => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+// Mayor número de factura de VENTA ya emitido. Solo cuentan los movimientos
+// de tipo "salida" con factura numérica: las entradas llevan el número de
+// factura del proveedor (texto libre, otra serie) y las devoluciones guardan
+// facturaOriginal, no generan números.
+function obtenerUltimaFacturaEmitida() {
+    let max = 0;
+    for (const m of DB.movimientos) {
+        if (m.tipo !== "salida" || m.factura === undefined || m.factura === null || m.factura === "") continue;
+        const n = Number(m.factura);
+        if (Number.isFinite(n) && n > max) max = Math.floor(n);
+    }
+    return max;
+}
+
 function guardarNegocio() {
+    if (!exigirAccesoConfig("configuracion", "guardar los datos del negocio")) return;
     DB.configuracion = {
         ...DB.configuracion,
         emoji: document.getElementById("subEmoji").value || "🏪",
@@ -4265,9 +4372,13 @@ function guardarNegocio() {
 }
 
 function guardarInventario() {
+    if (!exigirAccesoConfig("config_inventario", "cambiar los ajustes de inventario")) return;
+    // stockMinimo global: vacío = 5 (valor por defecto de siempre); 0 explícito se conserva.
+    const stockMin = leerNumeroCampo("subStockMinimo", { etiqueta: "Stock mínimo", min: 0, defecto: 5 });
+    if (!stockMin.ok) { alert(`⚠️ ${stockMin.error}`); return; }
     DB.configuracion = {
         ...DB.configuracion,
-        stockMinimo: Number(document.getElementById("subStockMinimo").value) || 5,
+        stockMinimo: stockMin.valor,
         alertasStock: document.getElementById("subAlertasStock").checked,
         mostrarAgotados: document.getElementById("subMostrarAgotados").checked,
         alertaVencimiento: document.getElementById("subAlertaVencimiento").checked,
@@ -4280,14 +4391,35 @@ function guardarInventario() {
 }
 
 function guardarVentas() {
+    if (!exigirAccesoConfig("config_ventas", "cambiar los ajustes de ventas")) return;
+    // proxFactura: obligatorio, entero >= 1 y, si se cambia, MAYOR que la
+    // última factura de venta emitida (no se repite ni retrocede).
+    const prox = leerNumeroCampo("subProxFactura", { etiqueta: "Próximo número de factura", min: 1, entero: true });
+    if (!prox.ok) { alert(`⚠️ ${prox.error}`); return; }
+    const proxActual = Number(DB.configuracion.proxFactura) || 1;
+    if (prox.valor !== proxActual) {
+        const ultima = obtenerUltimaFacturaEmitida();
+        if (prox.valor <= ultima) {
+            alert(`⚠️ El próximo número de factura debe ser mayor que ${ultima}, que es la última factura emitida.`);
+            return;
+        }
+    }
+    // Aviso (no bloquea el guardado): exigir caja sin tener una abierta
+    // impide vender hasta abrirla.
+    const exigeCaja = document.getElementById("subCajaObligatoria").checked;
+    if (exigeCaja && DB.configuracion.cajaObligatoria !== true && !DB.sesionCajaActiva()) {
+        if (!confirm("⚠️ Con \"Caja obligatoria\" activada no podrás vender hasta abrir una caja, y ahora no hay ninguna abierta.\n\n¿Guardar de todos modos?")) return;
+    }
     DB.configuracion = {
         ...DB.configuracion,
         metodoPagoDefault: document.getElementById("subMetodoPago").value,
         ventasSinStock: document.getElementById("subVentasSinStock").checked,
         solicitarCliente: document.getElementById("subSolicitarCliente").checked,
-        cajaObligatoria: document.getElementById("subCajaObligatoria").checked,
-        numAuto: document.getElementById("subNumAuto").checked,
-        proxFactura: Number(document.getElementById("subProxFactura").value) || 1
+        cajaObligatoria: exigeCaja,
+        // Fase J8-B: la numeración es siempre automática (el POS no tiene
+        // entrada manual de número). Ver generarNumeroFacturaPOS().
+        numAuto: true,
+        proxFactura: prox.valor
     };
     DB.guardar();
     mostrarToast("✅ Ventas guardado");
@@ -4295,13 +4427,17 @@ function guardarVentas() {
 }
 
 function guardarOnat() {
+    if (!exigirAccesoConfig("onat", "cambiar los ajustes de ONAT")) return;
+    // 0-100; vacío = 10 (valor por defecto de siempre); 0 explícito se conserva.
+    const pct = leerNumeroCampo("subPorcentajeImpuesto", { etiqueta: "Porcentaje de impuesto", min: 0, max: 100, defecto: 10 });
+    if (!pct.ok) { alert(`⚠️ ${pct.error}`); return; }
     DB.configuracion = {
         ...DB.configuracion,
         regimenFiscal: document.getElementById("subRegimen").value,
         numONAT: document.getElementById("subNumONAT").value.trim(),
         actividad: document.getElementById("subActividad").value.trim(),
         impuestoAuto: document.getElementById("subImpuestoAuto").checked,
-        porcentajeImpuesto: Number(document.getElementById("subPorcentajeImpuesto").value) || 10
+        porcentajeImpuesto: pct.valor
     };
     DB.guardar();
     mostrarToast("✅ ONAT guardado");
@@ -4309,12 +4445,16 @@ function guardarOnat() {
 }
 
 function guardarNotificaciones() {
+    if (!exigirAccesoConfig("config_inventario", "cambiar los ajustes de notificaciones")) return;
+    // 1-365 días; vacío = 7 (valor por defecto de siempre).
+    const dias = leerNumeroCampo("subDiasVencimiento", { etiqueta: "Días de aviso de vencimiento", min: 1, max: 365, entero: true, defecto: 7 });
+    if (!dias.ok) { alert(`⚠️ ${dias.error}`); return; }
     DB.configuracion = {
         ...DB.configuracion,
         notifStockBajo: document.getElementById("subNotifStockBajo").checked,
         notifAlSalida: document.getElementById("subNotifAlSalida").checked,
         notifVencimiento: document.getElementById("subNotifVencimiento").checked,
-        diasVencimiento: Number(document.getElementById("subDiasVencimiento").value) || 7
+        diasVencimiento: dias.valor
     };
     DB.guardar();
     mostrarToast("✅ Notificaciones guardadas");
@@ -4322,6 +4462,9 @@ function guardarNotificaciones() {
 }
 
 function guardarSeguridad() {
+    // Fase J8-B: solo se añade el permiso. La lógica del PIN global NO se
+    // toca (queda para la fase J9).
+    if (!exigirAccesoConfig("configuracion", "cambiar la configuración de seguridad")) return;
     const pinActivo = document.getElementById("subPinActivo").checked;
     let pin = DB.configuracion.pin;
     if (pinActivo) {
@@ -5626,8 +5769,8 @@ function mostrarAlmacenes() {
         return `
         <div class="alm-card" onclick="abrirAlmacenDetalle('${a.id}')">
             <div class="alm-card-header">
-                <span class="alm-card-emoji">${a.emoji || "🏪"}</span>
-                <span class="alm-card-nombre">${a.nombre}</span>
+                <span class="alm-card-emoji">${escapeHtml(a.emoji || "🏪")}</span>
+                <span class="alm-card-nombre">${escapeHtml(a.nombre)}</span>
                 ${inactivoTag}
             </div>
             <div class="alm-card-stats">
@@ -5647,6 +5790,8 @@ function seleccionarAlmEmoji(emoji) {
 }
 
 function abrirModalAlmacen(id) {
+    // Fase J8-C: primera comprobación (la segunda está en guardarAlmacenDesdeFormulario).
+    if (!exigirAccesoConfig("gestionar_almacenes", id ? "editar almacenes" : "crear almacenes")) return;
     const scroll = document.getElementById("almEmojiScroll");
     scroll.innerHTML = EMOJIS_ALMACEN.map(e => `
         <button class="alm-emoji-btn" onclick="seleccionarAlmEmoji('${e}')">${e}</button>`).join("");
@@ -5687,7 +5832,31 @@ function cerrarModalAlmacen() {
     editandoAlmacenId = null;
 }
 
-document.getElementById("btnGuardarAlmacen").addEventListener("click", () => {
+// Guarda en localStorage de forma SÍNCRONA y, si falla, ejecuta `revertir()`
+// y vuelve a guardar el estado anterior (guardar() escribe 13 claves una por
+// una; un fallo a mitad dejaría datos parciales). Devuelve true/false.
+function persistirConReversion(revertir) {
+    DB._errorGuardado = false;
+    try {
+        DB._guardarInmediato();
+        if (!DB._errorGuardado) return true;
+    } catch (err) {
+        console.error("persistirConReversion():", err);
+    }
+    try { revertir(); } catch (err2) { console.error(err2); }
+    DB._errorGuardado = false;
+    try { DB._guardarInmediato(); } catch (err3) { console.error(err3); }
+    return false;
+}
+
+const _normalizarNombreAlmacen = s => String(s == null ? "" : s).trim().toLowerCase();
+
+// Antes era un listener anónimo; ahora es una función con nombre para poder
+// comprobar su protección también cuando se la llama directamente.
+function guardarAlmacenDesdeFormulario() {
+    // Fase J8-C: segunda comprobación, al ejecutar (no solo al abrir el formulario).
+    if (!exigirAccesoConfig("gestionar_almacenes", editandoAlmacenId ? "guardar cambios en el almacén" : "crear el almacén")) return;
+
     const nombre = document.getElementById("almNombre").value.trim();
     if (!nombre) { alert("⚠️ El nombre del almacén es obligatorio."); return; }
 
@@ -5701,29 +5870,70 @@ document.getElementById("btnGuardarAlmacen").addEventListener("click", () => {
         activo: document.getElementById("almActivo").checked
     };
 
-    if (editandoAlmacenId) {
-        const idx = DB.almacenes.findIndex(a => a.id === editandoAlmacenId);
-        if (idx !== -1) {
-            const nombreAnterior = DB.almacenes[idx].nombre;
-            DB.almacenes[idx] = { ...DB.almacenes[idx], ...datos };
-            // Si el nombre cambió, actualizar productos que referencian el almacén anterior
-            if (nombreAnterior !== nombre) {
-                DB.productos.forEach(p => { if (p.almacen === nombreAnterior) p.almacen = nombre; });
-            }
+    const idx = editandoAlmacenId ? DB.almacenes.findIndex(a => a.id === editandoAlmacenId) : -1;
+    if (editandoAlmacenId && idx === -1) { alert("⚠️ Ese almacén ya no existe. No se guardó ningún cambio."); return; }
+    const previo = idx !== -1 ? DB.almacenes[idx] : null;
+
+    // ── Validaciones: TODAS antes de escribir nada ──
+    // Nombre único (sin distinguir mayúsculas ni espacios extremos). Un almacén
+    // heredado que ya está duplicado puede editarse mientras conserve su nombre.
+    const nombreCambia = !previo || _normalizarNombreAlmacen(previo.nombre) !== _normalizarNombreAlmacen(nombre);
+    if (nombreCambia) {
+        const otro = DB.almacenes.find(a => (!previo || a.id !== previo.id) && _normalizarNombreAlmacen(a.nombre) === _normalizarNombreAlmacen(nombre));
+        if (otro) { alert(`⚠️ Ya existe un almacén llamado "${otro.nombre}". Elige otro nombre.`); return; }
+    }
+    // No desactivar un almacén que usa una tienda: sus usuarios perderían el acceso a POS y caja.
+    if (previo && previo.activo !== false && datos.activo === false) {
+        const tienda = DB.tiendas.find(t => t.almacenId === previo.id);
+        if (tienda) {
+            alert(`⚠️ No puedes desactivar "${previo.nombre}" porque la tienda "${tienda.nombre}" lo usa como su almacén de venta. Cambia esa asignación primero en Configuración → Tiendas.`);
+            return;
+        }
+    }
+
+    if (previo) {
+        const nombreAnterior = previo.nombre;
+        // Registro de cada cambio para poder revertirlo si el guardado falla.
+        const cambios = [];
+        const poner = (obj, campo, valor) => { cambios.push({ obj, campo, previo: obj[campo] }); obj[campo] = valor; };
+        DB.almacenes[idx] = { ...previo, ...datos };
+        if (nombreAnterior !== nombre) {
+            // El nombre es la clave que enlaza productos, gastos y transferencias.
+            DB.productos.forEach(p => { if (p.almacen === nombreAnterior) poner(p, "almacen", nombre); });
+            DB.gastos.forEach(g => { if (g.almacen === nombreAnterior) poner(g, "almacen", nombre); });
+            DB.movimientos.forEach(m => {
+                if (m.tipo !== "transferencia") return;
+                if (m.origen === nombreAnterior) poner(m, "origen", nombre);
+                if (m.destino === nombreAnterior) poner(m, "destino", nombre);
+            });
+            if (sheetFiltroActivo === nombreAnterior) sheetFiltroActivo = nombre;
+        }
+        const ok = persistirConReversion(() => {
+            cambios.forEach(c => { c.obj[c.campo] = c.previo; });
+            DB.almacenes[idx] = previo;
+            if (sheetFiltroActivo === nombre) sheetFiltroActivo = nombreAnterior;
+        });
+        if (!ok) {
+            alert("🔴 No se pudo guardar el cambio. El almacén, sus productos, gastos y transferencias quedaron como estaban.");
+            return;
         }
         mostrarToast("✅ Almacén actualizado");
     } else {
         const nuevo = { id: DB.generarId("alm"), ...datos };
         DB.almacenes.push(nuevo);
+        const ok = persistirConReversion(() => { DB.almacenes = DB.almacenes.filter(a => a.id !== nuevo.id); });
+        if (!ok) { alert("🔴 No se pudo guardar el almacén nuevo. No se creó ningún cambio."); return; }
         mostrarToast("✅ Almacén creado");
     }
-    DB.guardar();
     cerrarModalAlmacen();
     mostrarAlmacenes();
     actualizarInicio();
-});
+}
+document.getElementById("btnGuardarAlmacen").addEventListener("click", guardarAlmacenDesdeFormulario);
 
 function abrirAlmacenDetalle(id) {
+    const acceso = resolverAccesoModulo("ver_inventario");
+    if (acceso.modo === "bloqueado") { alert(`⛔ No puedes acceder a los almacenes:\n\n${acceso.motivo}`); return; }
     const a = DB.almacenes.find(al => al.id === id);
     if (!a) return;
     almacenActualId = id;
@@ -5797,8 +6007,14 @@ function mostrarProductosAlmacen() {
 }
 
 function confirmarEliminarAlmacen() {
+    // Fase J8-C: permiso al empezar y otra vez justo antes de eliminar.
+    if (!exigirAccesoConfig("gestionar_almacenes", "eliminar almacenes")) return;
     const a = DB.almacenes.find(al => al.id === almacenActualId);
     if (!a) return;
+    if (DB.almacenes.length <= 1) {
+        alert(`⚠️ No puedes eliminar "${a.nombre}" porque es el único almacén. Sin almacenes no habría dónde ubicar los productos.`);
+        return;
+    }
     const enUso = DB.productos.filter(p => p.almacen === a.nombre).length;
     if (enUso > 0) {
         alert(`⚠️ No puedes eliminar "${a.nombre}" porque tiene ${enUso} producto(s) asignados. Mueve o elimina esos productos primero.`);
@@ -5810,8 +6026,13 @@ function confirmarEliminarAlmacen() {
         return;
     }
     if (!confirm(`¿Eliminar el almacén "${a.nombre}"? Esta acción no se puede deshacer.`)) return;
+    if (!exigirAccesoConfig("gestionar_almacenes", "eliminar almacenes")) return;
+    const almacenesPrevios = DB.almacenes;
     DB.almacenes = DB.almacenes.filter(al => al.id !== almacenActualId);
-    DB.guardar();
+    if (!persistirConReversion(() => { DB.almacenes = almacenesPrevios; })) {
+        alert("🔴 No se pudo eliminar el almacén. Quedó como estaba.");
+        return;
+    }
     mostrarToast("✅ Almacén eliminado");
     volverAlmacenes();
 }
@@ -7889,7 +8110,7 @@ function abrirDetalleTributo(codigo) {
         ${!pagado && t.esAplicable && t.importe > 0 ? `
         <div style="padding:0 20px 14px;">
             <label style="font-size:12px;color:var(--text2);text-transform:uppercase;letter-spacing:0.5px;">Registrar pago</label>
-            <input type="date" id="pagoFecha" value="${new Date().toISOString().slice(0,10)}" style="width:100%;padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--surface);color:var(--text);margin:8px 0;box-sizing:border-box;">
+            <input type="date" id="pagoFecha" max="${fechaLocalISO()}" value="${fechaLocalISO()}" style="width:100%;padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--surface);color:var(--text);margin:8px 0;box-sizing:border-box;">
             <input type="text" id="pagoRecibo" placeholder="Número de recibo (opcional)" style="width:100%;padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--surface);color:var(--text);margin-bottom:8px;box-sizing:border-box;">
             <select id="pagoCanal" style="width:100%;padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--surface);color:var(--text);margin-bottom:12px;box-sizing:border-box;">
                 <option value="Transfermóvil">📱 Transfermóvil</option>
@@ -7908,11 +8129,32 @@ function marcarPagado(codigo, claveMes) {
 }
 
 function registrarPagoTributo(codigo, clave) {
-    const fecha = document.getElementById("pagoFecha").value;
-    const recibo = document.getElementById("pagoRecibo").value;
-    const canal = document.getElementById("pagoCanal").value;
+    if (!exigirAccesoConfig("onat", "registrar pagos de tributos")) return;
+    const elFecha = document.getElementById("pagoFecha");
+    const elRecibo = document.getElementById("pagoRecibo");
+    const elCanal = document.getElementById("pagoCanal");
+    if (!elFecha || !elRecibo || !elCanal) { alert("⚠️ No se encontró el formulario de pago."); return; }
+    const fecha = String(elFecha.value || "").trim();
+    const recibo = String(elRecibo.value || "").trim();
+    const canal = elCanal.value;
+    // Validaciones — nada se escribe si alguna falla.
+    if (!fecha) { alert("⚠️ La fecha de pago es obligatoria."); return; }
+    const fechaMediodia = new Date(fecha + "T12:00:00");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha) || isNaN(fechaMediodia.getTime()) || fechaLocalISO(fechaMediodia) !== fecha || fecha < "2000-01-01") {
+        alert("⚠️ La fecha de pago no es válida.");
+        return;
+    }
+    if (fecha > fechaLocalISO()) { alert("⚠️ La fecha de pago no puede ser futura."); return; }
+    if (!Array.from(elCanal.options).some(o => o.value === canal)) { alert("⚠️ Selecciona un canal de pago válido."); return; }
+    const pagoPrevio = (DB.configuracion.onatPagos || {})[clave];
+    if (pagoPrevio) {
+        const prev = new Date(pagoPrevio.fecha).toLocaleDateString("es-CU");
+        if (!confirm(`Ya hay un pago registrado para este tributo y periodo (${prev}).\n\n¿Quieres reemplazarlo?`)) return;
+    }
     if (!DB.configuracion.onatPagos) DB.configuracion.onatPagos = {};
-    DB.configuracion.onatPagos[clave] = { fecha: new Date(fecha).toISOString(), recibo, canal };
+    // Se guarda a mediodía LOCAL: a medianoche UTC (new Date("AAAA-MM-DD"))
+    // el pago se mostraba un día antes en Cuba (UTC-4/-5).
+    DB.configuracion.onatPagos[clave] = { fecha: fechaMediodia.toISOString(), recibo, canal };
     DB.guardar();
     mostrarToast("✅ Pago registrado");
     volverONAT();
@@ -8011,19 +8253,37 @@ function cargarExpediente() {
 }
 
 function guardarExpediente() {
+    if (!exigirAccesoConfig("onat", "guardar el expediente fiscal")) return;
+    // Todo se lee y valida ANTES de escribir. Un campo vacío usa su valor por
+    // defecto de siempre (el que muestra el placeholder); un 0 explícito se
+    // conserva (antes Number(x)||default lo convertía en el valor por defecto).
     const exp = {};
     ["NIT","Nombre","Municipio","Actividad","Banco","Sucursal","Cuenta","Inspector","TelONAT","Correo"].forEach(k => {
         const el = document.getElementById("exped" + k);
-        if (el) exp[k] = el.value;
+        if (el) exp[k] = el.value.trim();
     });
+    if (exp.Correo && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(exp.Correo)) {
+        alert('⚠️ El correo de ONAT no tiene un formato válido.');
+        return;
+    }
+    const campos = [
+        leerNumeroCampo("cfgTasa0114022", { etiqueta: "Tasa 0114022 (%)", min: 0, max: 100, defecto: 10 }),
+        leerNumeroCampo("cfgTasa0510122", { etiqueta: "Tasa 0510122 (%)", min: 0, max: 100, defecto: 5 }),
+        leerNumeroCampo("cfgMinExentoMensual", { etiqueta: "Mínimo exento mensual", min: 0, defecto: 3260 }),
+        leerNumeroCampo("cfgMinExentoAnual", { etiqueta: "Mínimo exento anual", min: 0, defecto: 39120 }),
+        leerNumeroCampo("cfgSalarioEmpleados", { etiqueta: "Salario de empleados", min: 0, defecto: 0 }),
+        leerNumeroCampo("cfgBaseContrib", { etiqueta: "Base de contribución del titular", min: 0, defecto: 800 })
+    ];
+    const fallo = campos.find(c => !c.ok);
+    if (fallo) { alert(`⚠️ ${fallo.error}`); return; }
     DB.configuracion.expedienteFiscal = exp;
     if (!DB.configuracion.fiscal) DB.configuracion.fiscal = {};
-    DB.configuracion.fiscal.tasa0114022 = Number(document.getElementById("cfgTasa0114022").value) || 10;
-    DB.configuracion.fiscal.tasa0510122 = Number(document.getElementById("cfgTasa0510122").value) || 5;
-    DB.configuracion.fiscal.minExentoMensual = Number(document.getElementById("cfgMinExentoMensual").value) || 3260;
-    DB.configuracion.fiscal.minExentoAnual = Number(document.getElementById("cfgMinExentoAnual").value) || 39120;
-    DB.configuracion.fiscal.salarioEmpleados = Number(document.getElementById("cfgSalarioEmpleados").value) || 0;
-    DB.configuracion.fiscal.baseContribTitular = Number(document.getElementById("cfgBaseContrib").value) || 800;
+    DB.configuracion.fiscal.tasa0114022 = campos[0].valor;
+    DB.configuracion.fiscal.tasa0510122 = campos[1].valor;
+    DB.configuracion.fiscal.minExentoMensual = campos[2].valor;
+    DB.configuracion.fiscal.minExentoAnual = campos[3].valor;
+    DB.configuracion.fiscal.salarioEmpleados = campos[4].valor;
+    DB.configuracion.fiscal.baseContribTitular = campos[5].valor;
     DB.guardar();
     mostrarToast("✅ Expediente fiscal guardado");
 }
@@ -8990,12 +9250,17 @@ function abrirConfirmFiadoPOS(cli, saldo, total) {
 // Genera el número de factura reutilizando el contador existente en
 // DB.configuracion (proxFactura/numAuto). No crea un sistema paralelo.
 function generarNumeroFacturaPOS() {
+    // Fase J8-B: la numeración es SIEMPRE consecutiva, también si numAuto
+    // está en false (el POS no tiene entrada manual: antes todas las ventas
+    // salían con el mismo número). El número nunca es menor que la última
+    // factura emitida + 1, aunque proxFactura se haya dañado o bajado, y no
+    // depende de que proxFactura se haya guardado bien antes de recargar.
+    // Solo se llama después de validar el stock, así que una venta cancelada
+    // no consume número; devoluciones y anulaciones no generan números.
     const cfg = DB.configuracion;
-    const numero = cfg.proxFactura || 1;
-    if (cfg.numAuto !== false) {
-        cfg.proxFactura = numero + 1;
-        DB.guardar();
-    }
+    const numero = Math.max(Number(cfg.proxFactura) || 1, obtenerUltimaFacturaEmitida() + 1);
+    cfg.proxFactura = numero + 1;
+    DB.guardar();
     return numero;
 }
 
