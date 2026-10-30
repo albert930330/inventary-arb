@@ -2268,6 +2268,7 @@
     <button class="cfg-btn-save-top" onclick="guardarSeguridad()">Guardar</button>
   </div>
   <div class="sub-contenido">
+    <div id="avisoSeguridadArb" class="oculto" style="margin:12px 16px;padding:12px 14px;border-radius:12px;border:1px solid var(--warn);color:var(--warn);font-size:13px;line-height:1.4;"></div>
     <div class="cfg-grupo-label">ACCESO</div>
     <div class="cfg-grupo">
       <div class="cfg-toggle-row2">
@@ -2291,8 +2292,8 @@
       </div>
       <div class="cfg-row-sep"></div>
       <div class="cfg-input-row">
-        <span class="cfg-input-label">Bloqueo automático</span>
-        <select id="subBloqueoAuto" class="cfg-select-inline">
+        <span class="cfg-input-label">Bloqueo automático (No disponible)</span>
+        <select id="subBloqueoAuto" class="cfg-select-inline" disabled>
           <option value="0">Nunca</option>
           <option value="1">Al salir de la app</option>
           <option value="5">Después de 5 min</option>
@@ -2300,6 +2301,8 @@
           <option value="30">Después de 30 min</option>
         </select>
       </div>
+      <div class="cfg-row-sep"></div>
+      <div class="cfg-input-row"><span style="font-size:12px;color:var(--text2);">Todavía no bloquea la aplicación automáticamente.</span></div>
     </div>
 
     <div class="cfg-grupo-label">PRIVACIDAD</div>
@@ -2946,6 +2949,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
-<script src="app.js?v=20261027a"></script>
+<script src="app.js?v=20261029b"></script>
 </body>
 </html>

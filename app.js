@@ -1389,6 +1389,13 @@ let sheetFiltroActivo = "";
 let sheetModo = "movimiento";
 let productoAccionId = null;
 let pinIngresado = "";
+// J9-2 (declaradas aquí porque el arranque las usa antes de definir las funciones)
+const PIN_INTENTOS_KEY = "arb_pin_intentos";
+const PIN_ESPERAS_SEG = [0, 0, 30, 60, 300, 900]; // por nº de fallos consecutivos (1..6+)
+const PIN_ESPERA_MAX_MS = 900 * 1000;
+let _pinValidando = false;
+let _pinTimerEspera = null;
+let _avisoProteccionMostradoArb = false;
 let subConfigActual = null;
 let almacenActualId = null;
 let tabAlmacenActual = "productos";
@@ -1446,6 +1453,7 @@ if (DB.configuracion.pinActivo && DB.configuracion.pin) {
 } else {
     actualizarInicio();
     verificarStockAlIniciar();
+    setTimeout(avisarProteccionArb, 0); // diferido: usuarioActual se declara más abajo
 }
 
 // ═══════════════════════════════════════════════
@@ -1564,6 +1572,9 @@ function iniciarBackButtonFisicoArb() {
         for (const m of mutaciones) {
             const el = m.target;
             if (!(el instanceof HTMLElement) || !el.id) continue;
+            // J9-1: la pantalla de PIN NO es una capa de "Atrás": no se registra
+            // en la pila ni en el historial, así el botón físico no puede ocultarla.
+            if (el.id === "modalPin") continue;
             const visible = !el.classList.contains("oculto");
             if (visible) alAbrirCapaOverlayArb(el.id);
             else alCerrarCapaOverlayArb(el.id);
@@ -1579,7 +1590,14 @@ function iniciarBackButtonFisicoArb() {
 
     window.addEventListener("popstate", () => {
         if (popstatesEsperadosArb > 0) { popstatesEsperadosArb--; return; }
-        if (!pilaCapasArb.length) return; // nada abierto por nuestro sistema: comportamiento normal
+        // J9-1: si la puerta de PIN está activa y no hay sesión, la pantalla de PIN
+        // debe seguir visible pase lo que pase con el botón Atrás.
+        const reforzarPinArb = () => {
+            const m = document.getElementById("modalPin");
+            if (m && m.classList.contains("oculto") && usuarioActual === null &&
+                DB.configuracion.pinActivo && DB.configuracion.pin) mostrarModalPin();
+        };
+        if (!pilaCapasArb.length) { reforzarPinArb(); return; } // nada abierto por nuestro sistema: comportamiento normal
         const idTope = pilaCapasArb[pilaCapasArb.length - 1];
         const el = document.getElementById(idTope);
         navegandoPorPopstateArb = true;
@@ -1596,6 +1614,7 @@ function iniciarBackButtonFisicoArb() {
             pilaCapasArb.pop();
         }
         navegandoPorPopstateArb = false;
+        reforzarPinArb();
     });
 }
 
@@ -4250,6 +4269,7 @@ function cargarSubConfig(sub) {
         document.getElementById("subBloqueoAuto").value = cfg.bloqueoAuto || 0;
         document.getElementById("subOcultarCompra").checked = cfg.ocultarCompra === true;
         if (cfg.pinActivo) document.getElementById("subPinCampos").classList.remove("oculto");
+        pintarAvisoSeguridadArb();
     }
     else if (sub === "usuarios") {
         renderListaUsuarios();
@@ -4964,7 +4984,69 @@ let usuarioActual = null;
 //      falle por cualquier motivo (navegador sin crypto.subtle, migración
 //      incompleta, etc.), el PIN de toda la vida sigue funcionando y nadie
 //      queda bloqueado fuera de su propia app.
+// ── J9-2: esperas crecientes tras PIN incorrecto ─────────────────────────
+// El contador vive en su PROPIA clave de localStorage (fuera de DB: no entra
+// en respaldos ni lo toca guardar()/importarRespaldo). Cualquier dato dañado
+// o error de almacenamiento = sin espera (nunca bloquea de forma indefinida).
+// (las constantes/variables de este bloque se declaran junto a "let pinIngresado",
+// antes del arranque, para no caer en la zona temporal muerta de const/let)
+
+function _pinLeerIntentos() {
+    try {
+        const crudo = localStorage.getItem(PIN_INTENTOS_KEY);
+        if (!crudo) return { fallos: 0, hasta: 0 };
+        const o = JSON.parse(crudo);
+        const fallos = Number(o && o.fallos), hasta = Number(o && o.hasta);
+        if (!Number.isFinite(fallos) || !Number.isFinite(hasta) || fallos < 0) return { fallos: 0, hasta: 0 };
+        return { fallos: Math.floor(fallos), hasta };
+    } catch (e) { return { fallos: 0, hasta: 0 }; }
+}
+
+function _pinEscribirIntentos(o) {
+    try { localStorage.setItem(PIN_INTENTOS_KEY, JSON.stringify(o)); return true; } catch (e) { return false; }
+}
+
+// Milisegundos de espera pendientes (0 = se puede intentar).
+function _pinEsperaRestanteMs() {
+    const o = _pinLeerIntentos();
+    let resta = o.hasta - Date.now();
+    if (!(resta > 0)) return 0;
+    if (resta > PIN_ESPERA_MAX_MS) {
+        // Reloj adelantado o dato absurdo: se recorta a 15 min contados desde ahora
+        // y se reescribe para que la cuenta atrás avance. Si no se puede reescribir,
+        // no se bloquea (evita una espera indefinida).
+        resta = PIN_ESPERA_MAX_MS;
+        if (!_pinEscribirIntentos({ fallos: o.fallos, hasta: Date.now() + resta })) return 0;
+    }
+    return resta;
+}
+
+function _pinRegistrarFallo() {
+    const o = _pinLeerIntentos();
+    const fallos = o.fallos + 1;
+    const seg = PIN_ESPERAS_SEG[Math.min(fallos, PIN_ESPERAS_SEG.length) - 1];
+    _pinEscribirIntentos({ fallos, hasta: seg > 0 ? Date.now() + seg * 1000 : 0 });
+}
+
+function _pinReiniciarFallos() {
+    try { localStorage.removeItem(PIN_INTENTOS_KEY); } catch (e) {}
+}
+
 async function iniciarSesion(pinIngresado) {
+    // Durante la espera (o con otra validación en curso) no se valida ningún PIN.
+    if (_pinValidando || _pinEsperaRestanteMs() > 0) return null;
+    _pinValidando = true;
+    try {
+        const usuario = await _validarPinAcceso(pinIngresado);
+        if (usuario) _pinReiniciarFallos(); else _pinRegistrarFallo();
+        return usuario;
+    } finally {
+        _pinValidando = false;
+    }
+}
+
+// Lógica de comparación ORIGINAL de iniciarSesion (sin cambios).
+async function _validarPinAcceso(pinIngresado) {
     const activos = DB.usuarios.filter(u => u.activo !== false);
     for (const u of activos) {
         if (u.pinHash && await verificarPin(u, pinIngresado)) {
@@ -4977,6 +5059,57 @@ async function iniciarSesion(pinIngresado) {
         if (admin) return _completarLogin(admin);
     }
     return null;
+}
+
+// ── J9-2: avisos de protección (SOLO LECTURA: no escribe ni modifica datos) ──
+async function _estadoProteccionArb() {
+    const cfg = DB.configuracion || {};
+    const pinVacio = cfg.pinActivo === true && !cfg.pin;
+    const sinProteccion = !(cfg.pinActivo && cfg.pin);
+    let pinFabrica = false;
+    try {
+        const admin = (DB.usuarios || []).find(u => u.id === "user_admin" && u.activo !== false);
+        if (admin) {
+            if (admin.pinHash) pinFabrica = await verificarPin(admin, "1234");
+            else if (admin.pinPendienteHash === "1234") pinFabrica = true;
+        }
+        // El PIN global también entra como Administrador (respaldo de iniciarSesion).
+        if (cfg.pin === "1234" && admin) pinFabrica = true;
+    } catch (e) { pinFabrica = false; }
+    return { pinVacio, sinProteccion, pinFabrica };
+}
+
+async function pintarAvisoSeguridadArb() {
+    const el = document.getElementById("avisoSeguridadArb");
+    if (!el) return;
+    try {
+        const e = await _estadoProteccionArb();
+        const lineas = [];
+        if (e.pinVacio) lineas.push("⚠️ El PIN figura como activo pero no hay ningún PIN definido: la aplicación NO está protegida. Define un PIN de 4 dígitos.");
+        else if (e.sinProteccion) lineas.push("⚠️ La aplicación no tiene PIN de acceso activo: cualquiera que abra el dispositivo puede usarla.");
+        if (e.pinFabrica) lineas.push("⚠️ El Administrador todavía acepta el PIN de fábrica 1234. Cámbialo en Configuración → Usuarios.");
+        el.innerHTML = "";
+        lineas.forEach(t => { const d = document.createElement("div"); d.textContent = t; d.style.marginBottom = "6px"; el.appendChild(d); });
+        el.classList.toggle("oculto", lineas.length === 0);
+    } catch (err) { el.classList.add("oculto"); }
+}
+
+// Toast de aviso: solo al Administrador (o sin sesión/modo sin PIN), una vez por apertura.
+async function avisarProteccionArb() {
+    try {
+        if (_avisoProteccionMostradoArb) return;
+        if (usuarioActual) {
+            const rol = (DB.roles || []).find(r => r.id === usuarioActual.rolId);
+            if (!rol || rol.clave !== "administrador") return;
+        }
+        _avisoProteccionMostradoArb = true;
+        const e = await _estadoProteccionArb();
+        let msg = null;
+        if (e.pinFabrica) msg = "⚠️ El Administrador sigue con el PIN de fábrica 1234. Cámbialo en Usuarios.";
+        else if (e.pinVacio) msg = "⚠️ PIN activo pero sin PIN definido: la app no está protegida (Configuración → Seguridad).";
+        else if (e.sinProteccion) msg = "⚠️ La app no tiene PIN activo (Configuración → Seguridad).";
+        if (msg) setTimeout(() => { try { mostrarToast(msg); } catch (x) {} }, 900);
+    } catch (err) {}
 }
 
 function _completarLogin(usuario) {
@@ -5696,9 +5829,36 @@ function mostrarModalPin() {
     actualizarDisplayPin();
     document.getElementById("modalPin").classList.remove("oculto");
     document.getElementById("pinError").style.display = "none";
+    if (_pinEsperaRestanteMs() > 0) _pinMostrarEspera(); else _pinDetenerEspera();
+}
+
+// J9-2: cuenta atrás visible en el modal del PIN. Un solo temporizador a la vez.
+function _pinDetenerEspera() {
+    if (_pinTimerEspera) { clearInterval(_pinTimerEspera); _pinTimerEspera = null; }
+}
+function _pinMostrarEspera() {
+    const err = document.getElementById("pinError");
+    if (!err) return;
+    _pinDetenerEspera();
+    const tick = () => {
+        const modal = document.getElementById("modalPin");
+        const ms = _pinEsperaRestanteMs();
+        if (ms <= 0 || !modal || modal.classList.contains("oculto")) {
+            _pinDetenerEspera();
+            err.style.display = "none";
+            err.textContent = "PIN incorrecto. Intenta de nuevo.";
+            return;
+        }
+        const seg = Math.ceil(ms / 1000);
+        err.textContent = "Demasiados intentos. Espera " + Math.floor(seg / 60) + ":" + String(seg % 60).padStart(2, "0");
+        err.style.display = "block";
+    };
+    tick();
+    if (_pinEsperaRestanteMs() > 0) _pinTimerEspera = setInterval(tick, 1000);
 }
 
 function pinTecla(digito) {
+    if (_pinEsperaRestanteMs() > 0) { pinIngresado = ""; actualizarDisplayPin(); _pinMostrarEspera(); return; }
     if (pinIngresado.length >= 4) return;
     pinIngresado += digito;
     actualizarDisplayPin();
@@ -5706,13 +5866,18 @@ function pinTecla(digito) {
         setTimeout(async () => {
             const usuario = await iniciarSesion(pinIngresado);
             if (usuario) {
+                _pinDetenerEspera();
                 document.getElementById("modalPin").classList.add("oculto");
                 actualizarInicio();
                 verificarStockAlIniciar();
+                avisarProteccionArb();
             } else {
-                document.getElementById("pinError").style.display = "block";
+                const err = document.getElementById("pinError");
+                err.textContent = "PIN incorrecto. Intenta de nuevo.";
+                err.style.display = "block";
                 pinIngresado = "";
                 actualizarDisplayPin();
+                if (_pinEsperaRestanteMs() > 0) _pinMostrarEspera();
             }
         }, 200);
     }
